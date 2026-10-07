@@ -186,6 +186,10 @@ def test_reconnect_matrix():
             attempts = {"connect": 0, "mine": 0}
 
             class FakeSocket:
+                def recv(self, _size):
+                    return b""
+                def sendall(self, _data):
+                    return None
                 def close(self):
                     pass
 
