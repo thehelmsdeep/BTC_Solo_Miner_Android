@@ -324,10 +324,13 @@ static inline void sha256_8_hashes(const SHA256_CTX *base,
 static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     uint32x4_t state0=vld1q_u32(&h[0]), state1=vld1q_u32(&h[4]);
     const uint32x4_t save0=state0, save1=state1;
-    uint32x4_t m0=vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[0]))));
-    uint32x4_t m1=vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[4]))));
-    uint32x4_t m2=vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[8]))));
-    uint32x4_t m3=vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[12]))));
+    /* w[] already contains SHA-256 message words in big-endian numeric
+     * form. The ARM SHA instructions consume those words directly; applying
+     * vrev32 here would byte-swap them a second time and corrupt every hash. */
+    uint32x4_t m0=vld1q_u32(&w[0]);
+    uint32x4_t m1=vld1q_u32(&w[4]);
+    uint32x4_t m2=vld1q_u32(&w[8]);
+    uint32x4_t m3=vld1q_u32(&w[12]);
 #define ARM_SHA_ROUND(MSG,KOFF) do { \
     uint32x4_t old0=state0; \
     uint32x4_t wk=vaddq_u32((MSG),vld1q_u32(&K[(KOFF)])); \
