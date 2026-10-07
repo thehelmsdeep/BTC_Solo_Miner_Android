@@ -75,6 +75,7 @@ def send_json(sock, payload):
 def double_sha256(data):
     return hashlib.sha256(hashlib.sha256(data).digest()).digest()
 
+
 def ensure_native():
     global _native
     if not NATIVE_ENABLED or _native is not None:
@@ -93,9 +94,6 @@ def ensure_native():
         if os.name == "nt":
             cmd = [compiler, "-O3", "-march=native", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-shared", "-o", str(NATIVE_LIB), str(source_file)]
         else:
-            # Android ARM64 devices with the SHA2 extension get explicit
-            # ARMv8 crypto codegen so __ARM_FEATURE_SHA2 is enabled and the
-            # native engine can use SHA256H/SHA256H2/SHA256SU instructions.
             machine = platform.machine().lower()
             march = "armv8-a+crypto" if machine in ("aarch64", "arm64") else "native"
             cmd = [compiler, "-O3", f"-march={march}", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared", "-o", str(NATIVE_LIB), str(NATIVE_DIR / "sha256_engine.c")]
@@ -144,10 +142,14 @@ def ensure_native():
         lib.b_m_engine_destroy.argtypes = [ctypes.c_void_p]
         lib.b_m_engine_destroy.restype = None
 
-        if not lib.b_m_selftest():
-            print(Fore.RED, "[!] Native SHA256 self-test FAILED; using Python SHA256 fallback")
+        # Native self-tests use 0 for PASS and non-zero for FAIL.
+        # Do not use "if not ..." here: that incorrectly treats PASS (0) as failure.
+        selftest = lib.b_m_selftest()
+        if selftest != 0:
+            print(Fore.RED, "[!] Native SHA256 self-test FAILED (code=%d); using Python SHA256 fallback" % selftest)
             return None
         print(Fore.GREEN, "[*] Native SHA256 self-test: PASS")
+
         engine_test = lib.b_m_engine_selftest()
         if engine_test != 0:
             print(Fore.RED, "[!] Native engine integration self-test FAILED (code=%d)" % engine_test)
@@ -158,6 +160,7 @@ def ensure_native():
     except OSError as exc:
         print(Fore.YELLOW, "[!] Native engine load failed; using Python fallback:", exc)
         return None
+
 
 def native_engine_create(header_prefix, target):
     global _native_engine
@@ -252,7 +255,6 @@ def native_mine_parallel(header_prefix, target, start):
 
 
 def native_mine(header_prefix, target, start, step):
-    # Compatibility wrapper; the optimized path uses native parallel mining.
     return native_mine_parallel(header_prefix, target, start)
 
 
@@ -303,13 +305,7 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
     try:
         header_prefix = build_header_prefix(job, extranonce2)
         target = compact_to_target(job["nbits"])
-        # start_workers() only launches cpu_worker when the persistent
-        # native engine is unavailable. Do not call ensure_native() here:
-        # Windows multiprocessing uses spawn, so doing so would rebuild and
-        # rerun native self-tests in every child process after the parent has
-        # already selected the Python fallback.
 
-        # Portable Python fallback: multiple processes scan disjoint nonce lanes.
         sha256 = hashlib.sha256
         base = sha256(header_prefix[:64])
         tail = header_prefix[64:]
@@ -383,7 +379,6 @@ def start_workers(job):
 
 
 def submit_payload(job_id, extranonce2, ntime, nonce, submit_id):
-    """Build the exact Stratum mining.submit payload used by submit_share()."""
     return {
         "id": submit_id,
         "method": "mining.submit",
@@ -398,7 +393,6 @@ def submit_payload(job_id, extranonce2, ntime, nonce, submit_id):
 
 
 def submit_selftest():
-    """Validate submit payload construction without contacting the pool."""
     job_id = "selftest-job"
     extranonce2 = "01020304"
     ntime = "65abcdef"
@@ -509,13 +503,10 @@ def upstream_listener(sock):
                         elapsed = time.monotonic() - submitted_at
                         if accepted:
                             print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                                  "[+] SHARE ACCEPTED | id=%s | latency=%.3fs" %
-                                  (msg_id, elapsed), Style.RESET_ALL)
+                                  "[+] SHARE ACCEPTED | id=%s | latency=%.3fs" % (msg_id, elapsed), Style.RESET_ALL)
                         else:
                             print(Style.BRIGHT + Fore.WHITE + Back.RED,
-                                  "[-] SHARE REJECTED | id=%s | latency=%.3fs | error=%s" %
-                                  (msg_id, elapsed, msg.get("error") or ""),
-                                  Style.RESET_ALL)
+                                  "[-] SHARE REJECTED | id=%s | latency=%.3fs | error=%s" % (msg_id, elapsed, msg.get("error") or ""), Style.RESET_ALL)
                         logg("[*] Share %s: id=%s latency=%.3fs error=%s" %
                              ("ACCEPTED" if accepted else "REJECTED",
                               msg_id, elapsed, msg.get("error") or ""))
@@ -694,8 +685,6 @@ def miner_loop():
                     header_prefix = build_header_prefix(job, extranonce2)
                     target = compact_to_target(job["nbits"])
 
-                    # Keep the native worker threads alive across Stratum job
-                    # switches. Only replace the 76-byte header prefix/target.
                     if not native_engine_set_job(engine, header_prefix, target):
                         raise RuntimeError("Failed to update native mining job")
 
@@ -710,22 +699,11 @@ def miner_loop():
                     print(
                         Fore.WHITE,
                         "[*] Job details: nbits=%s | target=%064x | ntime=%s | clean_jobs=%s"
-                        % (
-                            job["nbits"],
-                            target,
-                            job["ntime"],
-                            job["clean_jobs"],
-                        ),
+                        % (job["nbits"], target, job["ntime"], job["clean_jobs"]),
                     )
                     logg(
                         "[*] New job: id=%s nbits=%s target=%064x ntime=%s clean_jobs=%s"
-                        % (
-                            job["job_id"],
-                            job["nbits"],
-                            target,
-                            job["ntime"],
-                            job["clean_jobs"],
-                        )
+                        % (job["job_id"], job["nbits"], target, job["ntime"], job["clean_jobs"])
                     )
 
                 new_job = globals()["current_job"]()
@@ -742,9 +720,6 @@ def miner_loop():
 
                 hit, found, hashes = native_engine_poll(engine)
                 if native_engine_exhausted(engine):
-                    # Rotate extranonce2 after the 32-bit nonce space is exhausted.
-                    # This changes the coinbase/merkle root while keeping the
-                    # same Stratum job and lets mining continue indefinitely.
                     extranonce2_size = int(ctx.upstream_extranonce2_size)
                     mask = (1 << (8 * extranonce2_size)) - 1
                     extranonce2 = (time.time_ns() & mask).to_bytes(
@@ -754,10 +729,7 @@ def miner_loop():
                     target = compact_to_target(current_job["nbits"])
                     if not native_engine_set_job(engine, header_prefix, target):
                         raise RuntimeError("Failed to restart native engine after nonce exhaustion")
-                    print(
-                        Fore.YELLOW,
-                        "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job",
-                    )
+                    print(Fore.YELLOW, "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job")
                     continue
                 if hashes:
                     hashes_since_report += hashes
@@ -778,42 +750,24 @@ def miner_loop():
                     logg("[!!!] VALID BLOCK HEADER FOUND: job=%s nonce=%08x nbits=%s" %
                          (current_job["job_id"], found, current_job["nbits"]))
                     try:
-                        submit_share(
-                            current_job["job_id"],
-                            extranonce2,
-                            current_job["ntime"],
-                            found,
-                        )
+                        submit_share(current_job["job_id"], extranonce2, current_job["ntime"], found)
                     except Exception as exc:
                         print(Fore.RED, "[!] Share submit failed:", exc)
 
-                    # Do not mine the same job again after a valid header.
-                    # Wait for the pool to announce a new generation.
                     native_engine_stop_job(engine)
                     waiting_for_new_job = True
                     continue
 
-                # Detect a new Stratum job without destroying/recreating the
-                # native thread pool.
                 if new_job["generation"] != current_generation:
                     continue
 
                 now = time.monotonic()
                 if now - last_report >= REPORT_INTERVAL:
-                    rate = hashes_since_report / max(
-                        now - last_report, 0.001
-                    )
+                    rate = hashes_since_report / max(now - last_report, 0.001)
                     print(
                         Fore.CYAN,
                         "[*] Hashrate: %.2f H/s | interval_hashes=%d | total_hashes=%d | submitted=%d accepted=%d rejected=%d"
-                        % (
-                            rate,
-                            hashes_since_report,
-                            ctx.total_hashes,
-                            ctx.shares_submitted,
-                            ctx.shares_accepted,
-                            ctx.shares_rejected,
-                        ),
+                        % (rate, hashes_since_report, ctx.total_hashes, ctx.shares_submitted, ctx.shares_accepted, ctx.shares_rejected),
                     )
                     hashes_since_report = 0
                     last_report = now
@@ -887,12 +841,7 @@ def miner_loop():
                              (found_job, nonce, job["nbits"]))
 
                         try:
-                            submit_share(
-                                found_job,
-                                extranonce2,
-                                found_ntime,
-                                nonce,
-                            )
+                            submit_share(found_job, extranonce2, found_ntime, nonce)
                         except Exception as exc:
                             print(Fore.RED, "[!] Share submit failed:", exc)
                         break
@@ -909,12 +858,7 @@ def miner_loop():
                 print(
                     Fore.CYAN,
                     "[*] Hashrate: %.2f H/s | submitted=%d accepted=%d rejected=%d"
-                    % (
-                        rate,
-                        ctx.shares_submitted,
-                        ctx.shares_accepted,
-                        ctx.shares_rejected,
-                    ),
+                    % (rate, ctx.shares_submitted, ctx.shares_accepted, ctx.shares_rejected),
                 )
                 hashes_since_report = 0
                 last_report = now
@@ -927,6 +871,7 @@ def miner_loop():
 
     if workers:
         stop_workers(workers, stop_event)
+
 
 def run():
     print(
