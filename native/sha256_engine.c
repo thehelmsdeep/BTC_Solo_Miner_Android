@@ -593,6 +593,7 @@ struct BM_ENGINE {
     uint64_t total_hashes;
     int job_ready;
     int stop_job;
+    int exhausted;
     int shutdown;
     int found_valid;
     uint32_t found_nonce;
@@ -767,7 +768,13 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             __atomic_fetch_add(&e->total_hashes, local, __ATOMIC_RELAXED);
 
         if (end >= 0x100000000ULL) {
-            __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
+            engine_lock(e);
+            if (!e->found_valid && !e->shutdown && e->job_generation == generation) {
+                e->exhausted = 1;
+                e->stop_job = 1;
+            }
+            engine_wake(e);
+            engine_unlock(e);
             return;
         }
     }
@@ -891,6 +898,7 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
     e->found_valid = 0;
     e->found_nonce = 0;
     e->stop_job = 0;
+    e->exhausted = 0;
     e->job_ready = 1;
     engine_wake(e);
     engine_unlock(e);
@@ -905,6 +913,14 @@ int b_m_engine_poll(BM_ENGINE *e, uint32_t *found, uint64_t *hashes) {
     if (hit) *found = e->found_nonce;
     engine_unlock(e);
     return hit;
+}
+
+int b_m_engine_exhausted(BM_ENGINE *e) {
+    if (!e) return 0;
+    engine_lock(e);
+    int exhausted = e->exhausted;
+    engine_unlock(e);
+    return exhausted;
 }
 
 void b_m_engine_stop_job(BM_ENGINE *e) {
