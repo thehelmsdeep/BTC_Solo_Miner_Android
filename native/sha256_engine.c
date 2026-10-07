@@ -979,11 +979,25 @@ int b_m_engine_selftest(void) {
     uint8_t prefix[76], target[32];
     const uint32_t expected_nonce = 0;
     for (int i=0;i<76;i++) prefix[i]=(uint8_t)i;
-    /* Every nonce is valid. The engine must therefore report the first
-     * nonce (zero), which also avoids racing a worker by modifying its
-     * private scan cursor after set_job(). Target comparison itself is
-     * covered by b_m_selftest(). */
-    memset(target, 0xff, sizeof(target));
+    /* Use the exact SHA256d of nonce 0 as the target. This makes the
+     * persistent path prove that its optimized hash/target path agrees with
+     * the scalar reference instead of merely proving that max-target hits. */
+    memset(target, 0, sizeof(target));
+    {
+        uint8_t header[80], d1[32];
+        SHA256_CTX ref = {0};
+        for (int i = 0; i < 76; ++i) header[i] = prefix[i];
+        memset(header + 76, 0, 4);
+        init(&ref);
+        update(&ref, header, 64);
+        SHA256_CTX r = ref;
+        update(&r, header + 64, 16);
+        final(&r, d1);
+        SHA256_CTX r2;
+        init(&r2);
+        update(&r2, d1, 32);
+        final(&r2, target);
+    }
 
     BM_ENGINE *e = b_m_engine_create(1);
     if (!e) return 1;
@@ -1050,6 +1064,44 @@ int b_m_selftest(void) {
     uint32_t t2=((uint32_t)prefix[72]<<24)|((uint32_t)prefix[73]<<16)|((uint32_t)prefix[74]<<8)|prefix[75];
 
     if (!hash_nonce_fast(&base, t0, t1, t2, target, nonce)) return 1;
+
+    /* Boundary-test the optimized nonce path at several nonce values.
+     * A single golden nonce is not enough: broken SHA2/NEON state handling
+     * can accidentally pass one vector while failing other nonces. */
+    {
+        static const uint32_t test_nonces[] = {
+            0U, 1U, 0x12345678U, 0x80000000U, 0xffffffffU
+        };
+        for (size_t ti = 0; ti < sizeof(test_nonces)/sizeof(test_nonces[0]); ++ti) {
+            uint32_t n = test_nonces[ti];
+            uint8_t hdr[80], d[32], lower[32];
+            memcpy(hdr, prefix, 76);
+            hdr[76] = (uint8_t)n;
+            hdr[77] = (uint8_t)(n >> 8);
+            hdr[78] = (uint8_t)(n >> 16);
+            hdr[79] = (uint8_t)(n >> 24);
+
+            SHA256_CTX x = base;
+            update(&x, hdr + 64, 16);
+            final(&x, d);
+            SHA256_CTX y;
+            init(&y);
+            update(&y, d, 32);
+            final(&y, d);
+
+            if (!hash_nonce(&prefix[0], &base, d, n)) return 1;
+
+            memcpy(lower, d, 32);
+            for (int j = 0; j < 32; ++j) {
+                if (lower[j] != 0) {
+                    --lower[j];
+                    break;
+                }
+                lower[j] = 0xff;
+            }
+            if (hash_nonce(&prefix[0], &base, lower, n)) return 1;
+        }
+    }
 
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
     {
