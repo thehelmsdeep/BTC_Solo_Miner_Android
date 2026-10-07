@@ -980,8 +980,8 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
     memcpy(e->prefix, prefix, 76);
     memcpy(e->target, target, 32);
     __atomic_add_fetch(&e->job_generation, 1, __ATOMIC_RELAXED);
-    e->next_nonce = 0;
-    e->total_hashes = 0;
+    __atomic_store_n(&e->next_nonce, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&e->total_hashes, 0, __ATOMIC_RELAXED);
     e->found_valid = 0;
     e->found_nonce = 0;
     __atomic_store_n(&e->stop_job, 0, __ATOMIC_RELAXED);
