@@ -635,8 +635,13 @@ def upstream_listener(sock):
             print(Fore.RED, "[!] Upstream listener stopped:", exc)
             logg("[!] Upstream listener stopped: %s" % exc)
     finally:
-        ctx.upstream_alive = False
-        expire_pending_submits(force=True)
+        # A reconnect can leave an older daemon listener briefly alive while
+        # the next connection is already active. Only the listener that still
+        # owns the current socket may mutate global connection state or drain
+        # the current submission map.
+        if ctx.upstream_sock is sock:
+            ctx.upstream_alive = False
+            expire_pending_submits(force=True)
 
 def expire_pending_submits(force=False):
     now = time.monotonic()
