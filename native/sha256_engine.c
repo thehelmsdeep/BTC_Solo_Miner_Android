@@ -443,34 +443,10 @@ static inline void arm_sha256_compress4(const uint32_t base_h[8],
                                         const uint32_t w2_fixed,
                                         const uint32_t nonces[4],
                                         uint32_t out_h[8][4]) {
-    uint32x4_t state0[2];
-    uint32x4_t state1[2];
-
-    state0[0] = vdupq_n_u32(base_h[0]);
-    state0[1] = vdupq_n_u32(base_h[1]);
-    state1[0] = vdupq_n_u32(base_h[2]);
-    state1[1] = vdupq_n_u32(base_h[3]);
-
-    uint32x4_t a = vdupq_n_u32(base_h[0]);
-    uint32x4_t b = vdupq_n_u32(base_h[1]);
-    uint32x4_t cc = vdupq_n_u32(base_h[2]);
-    uint32x4_t d = vdupq_n_u32(base_h[3]);
-    uint32x4_t e = vdupq_n_u32(base_h[4]);
-    uint32x4_t f = vdupq_n_u32(base_h[5]);
-    uint32x4_t g = vdupq_n_u32(base_h[6]);
-    uint32x4_t hh = vdupq_n_u32(base_h[7]);
-    (void)state0;
-    (void)state1;
-    (void)a; (void)b; (void)cc; (void)d; (void)e; (void)f; (void)g; (void)hh;
-
-    uint32x4_t s0 = vdupq_n_u32(base_h[0]);
-    uint32x4_t s1 = vdupq_n_u32(base_h[1]);
-    uint32x4_t s2 = vdupq_n_u32(base_h[2]);
-    uint32x4_t s3 = vdupq_n_u32(base_h[3]);
-    uint32x4_t s4 = vdupq_n_u32(base_h[4]);
-    uint32x4_t s5 = vdupq_n_u32(base_h[5]);
-    uint32x4_t s6 = vdupq_n_u32(base_h[6]);
-    uint32x4_t s7 = vdupq_n_u32(base_h[7]);
+    uint32x4_t state0 = { base_h[0], base_h[1], base_h[2], base_h[3] };
+    uint32x4_t state1 = { base_h[4], base_h[5], base_h[6], base_h[7] };
+    const uint32x4_t save0 = state0;
+    const uint32x4_t save1 = state1;
 
     uint32x4_t m0 = vdupq_n_u32(w0_fixed);
     uint32x4_t m1 = vdupq_n_u32(w1_fixed);
@@ -479,60 +455,48 @@ static inline void arm_sha256_compress4(const uint32_t base_h[8],
                       BSWAP32(nonces[2]), BSWAP32(nonces[3]) };
 
 #define ARM4_ROUND(MSG, KOFF) do { \
-    uint32x4_t _old = s0; \
+    uint32x4_t _old = state0; \
     uint32x4_t _wk = vaddq_u32((MSG), vdupq_n_u32(K[(KOFF)])); \
-    s0 = vsha256hq_u32(s0, s1, _wk); \
-    s1 = vsha256h2q_u32(s1, _old, _wk); \
+    state0 = vsha256hq_u32(state0, state1, _wk); \
+    state1 = vsha256h2q_u32(state1, _old, _wk); \
 } while (0)
 
     ARM4_ROUND(m0, 0);
     m0 = vsha256su0q_u32(m0, m1);
     m0 = vsha256su1q_u32(m0, m2, m3);
-
     ARM4_ROUND(m1, 4);
     m1 = vsha256su0q_u32(m1, m2);
     m1 = vsha256su1q_u32(m1, m3, m0);
-
     ARM4_ROUND(m2, 8);
     m2 = vsha256su0q_u32(m2, m3);
     m2 = vsha256su1q_u32(m2, m0, m1);
-
     ARM4_ROUND(m3, 12);
     m3 = vsha256su0q_u32(m3, m0);
     m3 = vsha256su1q_u32(m3, m1, m2);
-
     ARM4_ROUND(m0, 16);
     m0 = vsha256su0q_u32(m0, m1);
     m0 = vsha256su1q_u32(m0, m2, m3);
-
     ARM4_ROUND(m1, 20);
     m1 = vsha256su0q_u32(m1, m2);
     m1 = vsha256su1q_u32(m1, m3, m0);
-
     ARM4_ROUND(m2, 24);
     m2 = vsha256su0q_u32(m2, m3);
     m2 = vsha256su1q_u32(m2, m0, m1);
-
     ARM4_ROUND(m3, 28);
     m3 = vsha256su0q_u32(m3, m0);
     m3 = vsha256su1q_u32(m3, m1, m2);
-
     ARM4_ROUND(m0, 32);
     m0 = vsha256su0q_u32(m0, m1);
     m0 = vsha256su1q_u32(m0, m2, m3);
-
     ARM4_ROUND(m1, 36);
     m1 = vsha256su0q_u32(m1, m2);
     m1 = vsha256su1q_u32(m1, m3, m0);
-
     ARM4_ROUND(m2, 40);
     m2 = vsha256su0q_u32(m2, m3);
     m2 = vsha256su1q_u32(m2, m0, m1);
-
     ARM4_ROUND(m3, 44);
     m3 = vsha256su0q_u32(m3, m0);
     m3 = vsha256su1q_u32(m3, m1, m2);
-
     ARM4_ROUND(m0, 48);
     ARM4_ROUND(m1, 52);
     ARM4_ROUND(m2, 56);
@@ -540,23 +504,11 @@ static inline void arm_sha256_compress4(const uint32_t base_h[8],
 
 #undef ARM4_ROUND
 
-    s0 = vaddq_u32(s0, vdupq_n_u32(base_h[0]));
-    s1 = vaddq_u32(s1, vdupq_n_u32(base_h[1]));
-    s2 = vaddq_u32(s2, vdupq_n_u32(base_h[2]));
-    s3 = vaddq_u32(s3, vdupq_n_u32(base_h[3]));
-    s4 = vaddq_u32(s4, vdupq_n_u32(base_h[4]));
-    s5 = vaddq_u32(s5, vdupq_n_u32(base_h[5]));
-    s6 = vaddq_u32(s6, vdupq_n_u32(base_h[6]));
-    s7 = vaddq_u32(s7, vdupq_n_u32(base_h[7]));
+    state0 = vaddq_u32(state0, save0);
+    state1 = vaddq_u32(state1, save1);
 
-    vst1q_u32(out_h[0], s0);
-    vst1q_u32(out_h[1], s1);
-    vst1q_u32(out_h[2], s2);
-    vst1q_u32(out_h[3], s3);
-    vst1q_u32(out_h[4], s4);
-    vst1q_u32(out_h[5], s5);
-    vst1q_u32(out_h[6], s6);
-    vst1q_u32(out_h[7], s7);
+    vst1q_u32(out_h[0], state0);
+    vst1q_u32(out_h[4], state1);
 }
 
 static inline int arm_sha256_4_hashes(const SHA256_CTX *base,
@@ -567,96 +519,82 @@ static inline int arm_sha256_4_hashes(const SHA256_CTX *base,
     uint32_t first[8][4];
     arm_sha256_compress4(base->h, tail0, tail1, tail2, nonces, first);
 
-    uint32_t digest[8][4];
-    uint32x4_t s0 = vdupq_n_u32(0x6a09e667U);
-    uint32x4_t s1 = vdupq_n_u32(0xbb67ae85U);
-    uint32x4_t s2 = vdupq_n_u32(0x3c6ef372U);
-    uint32x4_t s3 = vdupq_n_u32(0xa54ff53AU);
-    uint32x4_t s4 = vdupq_n_u32(0x510e527fU);
-    uint32x4_t s5 = vdupq_n_u32(0x9b05688cU);
-    uint32x4_t s6 = vdupq_n_u32(0x1f83d9abU);
-    uint32x4_t s7 = vdupq_n_u32(0x5be0cd19U);
+    uint32x4_t state0 = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU
+    };
+    uint32x4_t state1 = {
+        0x510e527fU, 0x9b056c08U, 0x1f83d9abU, 0x5be0cd19U
+    };
+    const uint32x4_t save0 = state0;
+    const uint32x4_t save1 = state1;
 
     uint32x4_t m0 = vld1q_u32(first[0]);
-    uint32x4_t m1 = vld1q_u32(first[1]);
-    uint32x4_t m2 = vld1q_u32(first[2]);
-    uint32x4_t m3 = vld1q_u32(first[3]);
+    uint32x4_t m1 = vld1q_u32(first[4]);
+    uint32x4_t m2 = vld1q_u32(first[1]);
+    uint32x4_t m3 = vld1q_u32(first[5]);
+
+    /*
+     * The second SHA-256 block is the 32-byte first digest followed by
+     * SHA-256 padding. Arrange the eight digest words as m0..m3, where
+     * each vector contains four independent nonce lanes.
+     */
+    uint32x4_t d0 = vld1q_u32(first[0]);
+    uint32x4_t d1 = vld1q_u32(first[1]);
+    uint32x4_t d2 = vld1q_u32(first[2]);
+    uint32x4_t d3 = vld1q_u32(first[3]);
 
 #define ARM4_2ROUND(MSG, KOFF) do { \
-    uint32x4_t _old = s0; \
+    uint32x4_t _old = state0; \
     uint32x4_t _wk = vaddq_u32((MSG), vdupq_n_u32(K[(KOFF)])); \
-    s0 = vsha256hq_u32(s0, s1, _wk); \
-    s1 = vsha256h2q_u32(s1, _old, _wk); \
+    state0 = vsha256hq_u32(state0, state1, _wk); \
+    state1 = vsha256h2q_u32(state1, _old, _wk); \
 } while (0)
 
-    ARM4_2ROUND(m0, 0);
-    m0 = vsha256su0q_u32(m0, m1);
-    m0 = vsha256su1q_u32(m0, m2, m3);
-    ARM4_2ROUND(m1, 4);
-    m1 = vsha256su0q_u32(m1, m2);
-    m1 = vsha256su1q_u32(m1, m3, m0);
-    ARM4_2ROUND(m2, 8);
-    m2 = vsha256su0q_u32(m2, m3);
-    m2 = vsha256su1q_u32(m2, m0, m1);
-    ARM4_2ROUND(m3, 12);
-    m3 = vsha256su0q_u32(m3, m0);
-    m3 = vsha256su1q_u32(m3, m1, m2);
-    ARM4_2ROUND(m0, 16);
-    m0 = vsha256su0q_u32(m0, m1);
-    m0 = vsha256su1q_u32(m0, m2, m3);
-    ARM4_2ROUND(m1, 20);
-    m1 = vsha256su0q_u32(m1, m2);
-    m1 = vsha256su1q_u32(m1, m3, m0);
-    ARM4_2ROUND(m2, 24);
-    m2 = vsha256su0q_u32(m2, m3);
-    m2 = vsha256su1q_u32(m2, m0, m1);
-    ARM4_2ROUND(m3, 28);
-    m3 = vsha256su0q_u32(m3, m0);
-    m3 = vsha256su1q_u32(m3, m1, m2);
-    ARM4_2ROUND(m0, 32);
-    m0 = vsha256su0q_u32(m0, m1);
-    m0 = vsha256su1q_u32(m0, m2, m3);
-    ARM4_2ROUND(m1, 36);
-    m1 = vsha256su0q_u32(m1, m2);
-    m1 = vsha256su1q_u32(m1, m3, m0);
-    ARM4_2ROUND(m2, 40);
-    m2 = vsha256su0q_u32(m2, m3);
-    m2 = vsha256su1q_u32(m2, m0, m1);
-    ARM4_2ROUND(m3, 44);
-    m3 = vsha256su0q_u32(m3, m0);
-    m3 = vsha256su1q_u32(m3, m1, m2);
-    ARM4_2ROUND(m0, 48);
-    ARM4_2ROUND(m1, 52);
-    ARM4_2ROUND(m2, 56);
-    ARM4_2ROUND(m3, 60);
+    ARM4_2ROUND(d0, 0);
+    d0 = vsha256su0q_u32(d0, d1);
+    d0 = vsha256su1q_u32(d0, d2, d3);
+    ARM4_2ROUND(d1, 4);
+    d1 = vsha256su0q_u32(d1, d2);
+    d1 = vsha256su1q_u32(d1, d3, d0);
+    ARM4_2ROUND(d2, 8);
+    d2 = vsha256su0q_u32(d2, d3);
+    d2 = vsha256su1q_u32(d2, d0, d1);
+    ARM4_2ROUND(d3, 12);
+    d3 = vsha256su0q_u32(d3, d0);
+    d3 = vsha256su1q_u32(d3, d1, d2);
+
+    uint32x4_t z = vdupq_n_u32(0);
+    uint32x4_t pad = vdupq_n_u32(0x80000000U);
+    uint32x4_t len = vdupq_n_u32(0x00000100U);
+    ARM4_2ROUND(pad, 16);
+    ARM4_2ROUND(z, 20);
+    ARM4_2ROUND(z, 24);
+    ARM4_2ROUND(z, 28);
+    ARM4_2ROUND(z, 32);
+    ARM4_2ROUND(z, 36);
+    ARM4_2ROUND(z, 40);
+    ARM4_2ROUND(z, 44);
+    ARM4_2ROUND(z, 48);
+    ARM4_2ROUND(z, 52);
+    ARM4_2ROUND(z, 56);
+    ARM4_2ROUND(len, 60);
 
 #undef ARM4_2ROUND
 
-    s0 = vaddq_u32(s0, vdupq_n_u32(0x6a09e667U));
-    s1 = vaddq_u32(s1, vdupq_n_u32(0xbb67ae85U));
-    s2 = vaddq_u32(s2, vdupq_n_u32(0x3c6ef372U));
-    s3 = vaddq_u32(s3, vdupq_n_u32(0xa54ff53AU));
-    s4 = vaddq_u32(s4, vdupq_n_u32(0x510e527fU));
-    s5 = vaddq_u32(s5, vdupq_n_u32(0x9b056c08U));
-    s6 = vaddq_u32(s6, vdupq_n_u32(0x1f83d9abU));
-    s7 = vaddq_u32(s7, vdupq_n_u32(0x5be0cd19U));
+    state0 = vaddq_u32(state0, save0);
+    state1 = vaddq_u32(state1, save1);
 
-    vst1q_u32(digest[0], s0);
-    vst1q_u32(digest[1], s1);
-    vst1q_u32(digest[2], s2);
-    vst1q_u32(digest[3], s3);
-    vst1q_u32(digest[4], s4);
-    vst1q_u32(digest[5], s5);
-    vst1q_u32(digest[6], s6);
-    vst1q_u32(digest[7], s7);
+    uint32_t hv[8][4];
+    vst1q_u32(hv[0], state0);
+    vst1q_u32(hv[4], state1);
 
     for (int lane = 0; lane < 4; ++lane) {
         int ok = 1;
         for (int i = 7; i >= 0; --i) {
-            uint32_t hv = BSWAP32(digest[i][lane]);
+            uint32_t hvv = BSWAP32(hv[i][lane]);
             uint32_t tv = target_words[i];
-            if (hv < tv) break;
-            if (hv > tv) { ok = 0; break; }
+            if (hvv < tv) break;
+            if (hvv > tv) { ok = 0; break; }
         }
         hit_mask[lane] = (uint8_t)ok;
     }
