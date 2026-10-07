@@ -20,6 +20,7 @@ import miner_context as ctx
 from miner_config import CONFIG
 from miner_metrics import MinerMetrics
 from miner_state import MinerState, MinerStateMachine
+from miner_logging import StructuredLogger
 
 
 # Backward-compatible aliases. Configuration ownership lives in miner_config.py.
@@ -34,11 +35,14 @@ RECONNECT_DELAY = CONFIG.reconnect_delay
 SUBMIT_TIMEOUT = CONFIG.submit_timeout
 NATIVE_DIR = pathlib.Path(__file__).resolve().parent / "native"
 NATIVE_LIB = NATIVE_DIR / ("b_m_sha256.dll" if os.name == "nt" else "libb_m_sha256.so")
-NATIVE_ENABLED = os.getenv("BM_NATIVE", "1").lower() not in {"0", "false", "no"}
+NATIVE_ENABLED = CONFIG.native_enabled
 _native = None
 _native_engine = None
 metrics = MinerMetrics()
 state_machine = MinerStateMachine()
+structured_logger = StructuredLogger(
+    event_path=os.getenv("MINER_EVENT_LOG", "miner-events.jsonl")
+)
 
 
 def timer():
@@ -46,12 +50,9 @@ def timer():
 
 
 def logg(msg):
-    logging.basicConfig(
-        level=logging.INFO,
-        filename="miner.log",
-        format="%(asctime)s %(message)s",
-    )
-    logging.info(str(msg))
+    """Compatibility logging API backed by human + JSONL event logs."""
+    structured_logger.log(msg)
+    structured_logger.event("log", message=str(msg))
 
 
 def handler(signal_received, frame):
