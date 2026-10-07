@@ -977,11 +977,12 @@ void b_m_engine_destroy(BM_ENGINE *e) {
  * 3 if the engine reports a wrong nonce. */
 int b_m_engine_selftest(void) {
     uint8_t prefix[76], target[32];
-    const uint32_t expected_nonce = 0;
     for (int i=0;i<76;i++) prefix[i]=(uint8_t)i;
-    /* Use the exact SHA256d of nonce 0 as the target. This makes the
-     * persistent path prove that its optimized hash/target path agrees with
-     * the scalar reference instead of merely proving that max-target hits. */
+    /* Use the exact SHA256d of nonce 0 as the target. Nonce 0 is guaranteed
+     * valid, but it is NOT necessarily the first valid nonce: a later nonce
+     * may have a numerically smaller Bitcoin hash. The self-test therefore
+     * validates the engine's reported nonce independently instead of assuming
+     * that nonce 0 must be returned. */
     memset(target, 0, sizeof(target));
     {
         uint8_t header[80], d1[32];
@@ -1012,13 +1013,24 @@ int b_m_engine_selftest(void) {
     int result = 2;
     for (int i=0; i<200; ++i) {
         if (b_m_engine_poll(e, &found, &hashes)) {
-            if (found == expected_nonce) {
-                result = 0;
-            } else {
-                /* Encode the observed nonce for deterministic diagnostics.
-                 * 300..302 are reserved for persistent-engine failures. */
-                result = 300 + (int)(found & 0xffffU);
-            }
+            /* Independently recompute SHA256d for the reported nonce. This
+             * catches false-positive engine hits while allowing a valid nonce
+             * other than zero (which is expected for an inclusive target). */
+            uint8_t hdr[80], d1[32], d2[32];
+            memcpy(hdr, prefix, 76);
+            hdr[76] = (uint8_t)found;
+            hdr[77] = (uint8_t)(found >> 8);
+            hdr[78] = (uint8_t)(found >> 16);
+            hdr[79] = (uint8_t)(found >> 24);
+            SHA256_CTX r1;
+            init(&r1);
+            update(&r1, hdr, 80);
+            final(&r1, d1);
+            SHA256_CTX r2;
+            init(&r2);
+            update(&r2, d1, 32);
+            final(&r2, d2);
+            result = le_target(d2, target) ? 0 : 400 + (int)(found & 0xffffU);
             break;
         }
 #ifdef _WIN32
