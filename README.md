@@ -40,6 +40,8 @@ Environment variables:
 - `CPU_THREADS`
 - `NONCE_BATCH`
 - `REPORT_INTERVAL`
+- `RECONNECT_DELAY`
+- `SUBMIT_TIMEOUT`
 - `BM_NATIVE`
 
 Example:
@@ -55,3 +57,26 @@ Keep the phone cool and plugged in during long runs. Mobile CPUs can throttle un
 ## Important
 
 This is CPU solo mining. Finding a Bitcoin block is extremely unlikely at mobile/CPU hash rates; this project is primarily for experimentation and learning.
+
+
+## Diagnostics
+
+All diagnostics are offline except the normal miner run:
+
+```sh
+python tests/native_sha256_crosscheck.py
+python tests/native_sha256_diagnostic.py
+python tests/nonce_submit_integrity.py
+python tests/nonce_partition.py
+python tests/native_benchmark.py
+python tests/stratum_end_to_end.py
+python tests/reconnect_regression.py
+```
+
+The Stratum end-to-end test uses a local socket pair and a fake server. It
+exercises the production subscribe/authorize/notify/submit/response path
+without contacting a real pool.
+
+The miner also independently re-verifies every native PoW hit with Python
+SHA256d before submission, rejects stale job-generation hits, expires timed-out
+submit responses, and automatically reconnects after an upstream failure.
