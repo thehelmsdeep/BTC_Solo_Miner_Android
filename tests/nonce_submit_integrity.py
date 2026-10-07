@@ -22,7 +22,7 @@ GENESIS_HEADER_PREFIX = bytes.fromhex(
     + "29ab5f49"
     + "ffff001d"
 )
-GENESIS_NONCE = 0x1DAC2B7C
+GENESIS_NONCE = 0x7C2BAC1D
 GENESIS_TARGET = 0x00000000FFFF0000000000000000000000000000000000000000000000000000
 
 
@@ -47,7 +47,7 @@ def main():
             "genesis-test-job",
             "01020304",
             "29ab5f49",
-            "1dac2b7c",
+            "7c2bac1d",
         ],
     }
 
