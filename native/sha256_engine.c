@@ -473,6 +473,28 @@ static int hash_nonce(const uint8_t prefix[76],const SHA256_CTX *base,
  return hash_nonce_fast(base,t0,t1,t2,target,nonce);
 #endif
 }
+/* Independent diagnostic helper using the exact generic implementation
+ * used by b_m_mine(), including the same 64-byte prefix optimization. */
+void b_m_debug_sha256d_scalar_base(const uint8_t prefix[76], uint32_t nonce,
+                                   uint8_t digest[32]) {
+ uint8_t header[80], d1[32];
+ memcpy(header,prefix,76);
+ header[76]=(uint8_t)nonce;
+ header[77]=(uint8_t)(nonce>>8);
+ header[78]=(uint8_t)(nonce>>16);
+ header[79]=(uint8_t)(nonce>>24);
+ SHA256_CTX base;
+ init(&base);
+ update(&base,header,64);
+ SHA256_CTX a=base;
+ update(&a,header+64,16);
+ final(&a,d1);
+ SHA256_CTX b;
+ init(&b);
+ update(&b,d1,32);
+ final(&b,digest);
+}
+
 /* Independent diagnostic helper for the generic scalar SHA256d path. */
 void b_m_debug_sha256d_scalar(const uint8_t prefix[76], uint32_t nonce,
                               uint8_t digest[32]) {
