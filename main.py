@@ -270,18 +270,43 @@ def native_mine(header_prefix, target, start, step):
 
 
 def compact_to_target(nbits):
-    value = int(nbits, 16)
+    """Decode Bitcoin compact nBits into a non-negative 256-bit target.
+
+    This is intentionally strict: malformed/overflow targets must never reach
+    the native miner. Negative compact values are invalid for proof-of-work.
+    """
+    if not isinstance(nbits, str) or len(nbits) != 8:
+        raise ValueError("Invalid nbits encoding")
+    try:
+        value = int(nbits, 16)
+    except ValueError as exc:
+        raise ValueError("Invalid nbits hex") from exc
+
     exponent = value >> 24
     mantissa = value & 0x007FFFFF
     if value & 0x00800000:
-        mantissa = -mantissa
+        raise ValueError("Negative compact target")
+
+    if mantissa == 0:
+        raise ValueError("Zero compact target")
 
     if exponent <= 3:
         target = mantissa >> (8 * (3 - exponent))
     else:
         target = mantissa << (8 * (exponent - 3))
 
-    return max(0, target)
+    if target <= 0 or target >= (1 << 256):
+        raise ValueError("Compact target outside 256-bit range")
+
+    # Bitcoin's compact representation is canonical only when the top byte
+    # does not make the mantissa sign bit ambiguous. Reject non-canonical
+    # encodings that would otherwise decode to the same target.
+    if exponent > 3:
+        shifted = target >> (8 * (exponent - 3))
+        if shifted != mantissa:
+            raise ValueError("Non-canonical compact target")
+
+    return target
 
 
 def build_header_prefix(job, extranonce2):
