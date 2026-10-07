@@ -94,21 +94,27 @@ def test_parser_fuzz():
             assert all(isinstance(x, dict) for x in messages)
 
         # Fragmentation/coalescing: multiple valid frames must survive arbitrary
-    # packet boundaries exactly as they would on a TCP stream.
-    frames = [
-        {"id": 1, "method": "mining.subscribe", "params": []},
-        {"id": 2, "method": "mining.authorize", "params": ["x", "x"]},
-        {"id": None, "method": "mining.set_difficulty", "params": [1]},
-    ]
-    stream = b"".join((json.dumps(x, separators=(",", ":")) + "\n").encode()
-                       for x in frames)
+        # packet boundaries exactly as they would on a TCP stream.
+        frames = [
+            {"id": 1, "method": "mining.subscribe", "params": []},
+            {"id": 2, "method": "mining.authorize", "params": ["x", "x"]},
+            {"id": None, "method": "mining.set_difficulty", "params": [1]},
+        ]
+        stream = b"".join(
+            (json.dumps(x, separators=(",", ":")) + "\n").encode()
+            for x in frames
+        )
         for split in range(len(stream) + 1):
             left, right = stream[:split], stream[split:]
             first, rem = main.parse_messages(left)
             second, rem2 = main.parse_messages(rem + right)
             assert first + second == frames and rem2 == b""
-        check("Stratum parser fuzz + TCP framing", True,
-              "malformed_frames=2010 fragmented_splits=%d" % (len(stream) + 1))
+
+        check(
+            "Stratum parser fuzz + TCP framing",
+            True,
+            "malformed_frames=2010 fragmented_splits=%d" % (len(stream) + 1),
+        )
     finally:
         main.logg = original_logg
 
