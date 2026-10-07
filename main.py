@@ -745,6 +745,13 @@ def miner_loop():
                     target = compact_to_target(current_job["nbits"])
                     if not native_engine_set_job(engine, header_prefix, target):
                         raise RuntimeError("Failed to restart native engine after nonce exhaustion")
+
+                    # Refresh the frozen submission snapshot so it exactly matches
+                    # the header now being hashed by the native engine.
+                    current_job["extranonce2"] = extranonce2
+                    current_job["header_prefix"] = header_prefix
+                    current_job["target"] = target
+
                     print(Fore.YELLOW, "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job")
                     continue
                 if hashes:
