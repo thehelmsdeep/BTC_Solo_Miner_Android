@@ -111,7 +111,7 @@ def test_nbits():
         # Mainnet genesis / difficulty-1 target.
         "1d00ffff": GENESIS_TARGET,
         # Real block 100000 nBits.
-        "1b04864c": 0x0000000000000000000000000000000000000000000000000000000006f4e4c,
+        "1b04864c": int("04864c", 16) << (8 * (0x1b - 3)),
         # Small targets exercising exponents <= 3.
         "01010000": 1,
         "02008000": 0x80,
