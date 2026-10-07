@@ -131,6 +131,23 @@ The suite is fully offline: it uses local socket pairs and deterministic fake
 upstream behavior. It never contacts a real pool and never submits a real
 share.
 
+### Engineering Layer (Stage 5)
+
+Stage 5 keeps the mining behavior intact while separating engineering concerns:
+
+- `miner_config.py` owns environment parsing and runtime configuration.
+- `miner_state.py` defines explicit lifecycle states and rejects invalid transitions.
+- `miner_metrics.py` provides thread-safe runtime counters independent of Stratum state.
+- `main.py` keeps backward-compatible configuration aliases while using the new state and metrics layers.
+
+Run the offline Stage 5 regression suite manually:
+
+```bash
+python tests/engineering_fortress.py
+```
+
+The suite covers configuration parsing/minimums, lifecycle transition rules, and concurrent metrics updates. Stage 5 does not add GitHub Actions or CI/CD.
+
 ### Performance Research (Stage 4)
 
 Run the reproducible offline performance benchmark manually:
