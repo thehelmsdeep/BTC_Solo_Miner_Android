@@ -4,6 +4,26 @@ Android/Termux build of the solo Bitcoin CPU miner.
 
 This repository is kept separate from `solo_miner`. The mining logic and native engine are copied from the working desktop version; Android uses the existing non-Windows `.so` build path.
 
+
+
+## CPU Architecture
+
+The Android native mining engine is **optimized for 64-bit ARM (ARM64/AArch64)** devices.
+
+### Primary Android target
+
+- **Architecture:** ARM64 / AArch64
+- **ISA:** ARMv8-A
+- **SHA-256 acceleration:** ARMv8 Crypto Extensions
+- **Native build flags include:** `-march=armv8-a+crypto`, `-mtune=native`, LTO, loop unrolling, and frame-pointer omission.
+- **Recommended devices:** modern Android phones/tablets with 64-bit ARM CPUs and ARMv8 Crypto Extensions.
+
+The Android native build path is intentionally ARM64-oriented. **32-bit ARM (armeabi-v7a) is not the target for the native engine.** x86/x86-64 Android is also not the current native optimization target.
+
+If the native library cannot be built or loaded, the miner can fall back to the Python SHA-256 implementation. The native self-tests are run before the native engine is used.
+
+For the best performance, use a 64-bit ARM Android device where the CPU exposes ARMv8 Crypto Extensions.
+
 ## Run on Android
 
 Install **Termux** and then:
