@@ -321,38 +321,67 @@ static inline void sha256_8_hashes(const SHA256_CTX *base,
 
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
 #include <arm_neon.h>
+
+/* ARMv8 SHA-256 compression.  The input words are already decoded into
+ * SHA-256's big-endian numeric representation, so no byte swap is needed
+ * when loading them into NEON registers.  The schedule-update ordering below
+ * follows the ARM SHA256 four-round dataflow exactly. */
 static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
-    uint32x4_t state0=vld1q_u32(&h[0]), state1=vld1q_u32(&h[4]);
-    const uint32x4_t save0=state0, save1=state1;
-    /* w[] already contains SHA-256 message words in big-endian numeric
-     * form. The ARM SHA instructions consume those words directly; applying
-     * vrev32 here would byte-swap them a second time and corrupt every hash. */
-    uint32x4_t m0=vld1q_u32(&w[0]);
-    uint32x4_t m1=vld1q_u32(&w[4]);
-    uint32x4_t m2=vld1q_u32(&w[8]);
-    uint32x4_t m3=vld1q_u32(&w[12]);
-#define ARM_SHA_ROUND(MSG,KOFF) do { \
-    uint32x4_t old0=state0; \
-    uint32x4_t wk=vaddq_u32((MSG),vld1q_u32(&K[(KOFF)])); \
-    state0=vsha256hq_u32(state0,state1,wk); \
-    state1=vsha256h2q_u32(state1,old0,wk); \
-} while(0)
-    ARM_SHA_ROUND(m0,0);   m0=vsha256su0q_u32(m0,m1); m0=vsha256su1q_u32(m0,m2,m3);
-    ARM_SHA_ROUND(m1,4);   m1=vsha256su0q_u32(m1,m2); m1=vsha256su1q_u32(m1,m3,m0);
-    ARM_SHA_ROUND(m2,8);   m2=vsha256su0q_u32(m2,m3); m2=vsha256su1q_u32(m2,m0,m1);
-    ARM_SHA_ROUND(m3,12);  m3=vsha256su0q_u32(m3,m0); m3=vsha256su1q_u32(m3,m1,m2);
-    ARM_SHA_ROUND(m0,16);  m0=vsha256su0q_u32(m0,m1); m0=vsha256su1q_u32(m0,m2,m3);
-    ARM_SHA_ROUND(m1,20);  m1=vsha256su0q_u32(m1,m2); m1=vsha256su1q_u32(m1,m3,m0);
-    ARM_SHA_ROUND(m2,24);  m2=vsha256su0q_u32(m2,m3); m2=vsha256su1q_u32(m2,m0,m1);
-    ARM_SHA_ROUND(m3,28);  m3=vsha256su0q_u32(m3,m0); m3=vsha256su1q_u32(m3,m1,m2);
-    ARM_SHA_ROUND(m0,32);  m0=vsha256su0q_u32(m0,m1); m0=vsha256su1q_u32(m0,m2,m3);
-    ARM_SHA_ROUND(m1,36);  m1=vsha256su0q_u32(m1,m2); m1=vsha256su1q_u32(m1,m3,m0);
-    ARM_SHA_ROUND(m2,40);  m2=vsha256su0q_u32(m2,m3); m2=vsha256su1q_u32(m2,m0,m1);
-    ARM_SHA_ROUND(m3,44);  m3=vsha256su0q_u32(m3,m0); m3=vsha256su1q_u32(m3,m1,m2);
-    ARM_SHA_ROUND(m0,48); ARM_SHA_ROUND(m1,52); ARM_SHA_ROUND(m2,56); ARM_SHA_ROUND(m3,60);
-#undef ARM_SHA_ROUND
-    state0=vaddq_u32(state0,save0); state1=vaddq_u32(state1,save1);
-    vst1q_u32(&h[0],state0); vst1q_u32(&h[4],state1);
+    uint32x4_t s0 = vld1q_u32(&h[0]);
+    uint32x4_t s1 = vld1q_u32(&h[4]);
+    const uint32x4_t save0 = s0;
+    const uint32x4_t save1 = s1;
+
+    uint32x4_t m0 = vld1q_u32(&w[0]);
+    uint32x4_t m1 = vld1q_u32(&w[4]);
+    uint32x4_t m2 = vld1q_u32(&w[8]);
+    uint32x4_t m3 = vld1q_u32(&w[12]);
+
+#define ARM_SHA4(MSG, KOFF, NEXT0, NEXT1, NEXT2, NEXT3) do { \
+    uint32x4_t wk = vaddq_u32((MSG), vld1q_u32(&K[(KOFF)])); \
+    uint32x4_t old_s0 = s0; \
+    s0 = vsha256hq_u32(s0, s1, wk); \
+    s1 = vsha256h2q_u32(s1, old_s0, wk); \
+    (MSG) = vsha256su0q_u32((MSG), (NEXT0)); \
+    (MSG) = vsha256su1q_u32((MSG), (NEXT1), (NEXT2)); \
+} while (0)
+
+    ARM_SHA4(m0,  0, m1, m2, m3, m0);
+    ARM_SHA4(m1,  4, m2, m3, m0, m1);
+    ARM_SHA4(m2,  8, m3, m0, m1, m2);
+    ARM_SHA4(m3, 12, m0, m1, m2, m3);
+
+    ARM_SHA4(m0, 16, m1, m2, m3, m0);
+    ARM_SHA4(m1, 20, m2, m3, m0, m1);
+    ARM_SHA4(m2, 24, m3, m0, m1, m2);
+    ARM_SHA4(m3, 28, m0, m1, m2, m3);
+
+    ARM_SHA4(m0, 32, m1, m2, m3, m0);
+    ARM_SHA4(m1, 36, m2, m3, m0, m1);
+    ARM_SHA4(m2, 40, m3, m0, m1, m2);
+    ARM_SHA4(m3, 44, m0, m1, m2, m3);
+
+#undef ARM_SHA4
+
+    /* Final 16 rounds: the schedule words are already available. */
+#define ARM_SHA4_FINAL(MSG, KOFF) do { \
+    uint32x4_t wk = vaddq_u32((MSG), vld1q_u32(&K[(KOFF)])); \
+    uint32x4_t old_s0 = s0; \
+    s0 = vsha256hq_u32(s0, s1, wk); \
+    s1 = vsha256h2q_u32(s1, old_s0, wk); \
+} while (0)
+
+    ARM_SHA4_FINAL(m0, 48);
+    ARM_SHA4_FINAL(m1, 52);
+    ARM_SHA4_FINAL(m2, 56);
+    ARM_SHA4_FINAL(m3, 60);
+
+#undef ARM_SHA4_FINAL
+
+    s0 = vaddq_u32(s0, save0);
+    s1 = vaddq_u32(s1, save1);
+    vst1q_u32(&h[0], s0);
+    vst1q_u32(&h[4], s1);
 }
 static inline void hash_nonce_arm_digest(const SHA256_CTX *base,uint32_t t0,uint32_t t1,uint32_t t2,uint32_t nonce,uint8_t digest[32]){
     uint32_t b1[16]={t0,t1,t2,BSWAP32(nonce),0x80000000U,0,0,0,0,0,0,0,0,0,0,0x00000280U};
