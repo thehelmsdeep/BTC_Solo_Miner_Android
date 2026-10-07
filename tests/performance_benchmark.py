@@ -161,13 +161,20 @@ def native_engine(lib, threads, duration):
             time.sleep(0.005)
 
         lib.b_m_engine_stop_job(engine)
-        # Give workers a brief chance to flush their final counters.
-        for _ in range(200):
+        # Workers may still be finishing their current nonce after stop_job.
+        # Require several consecutive empty polls before declaring the counter
+        # drained, rather than stopping on the first transient zero.
+        empty_polls = 0
+        for _ in range(250):
             lib.b_m_engine_poll(engine, ctypes.byref(found), ctypes.byref(hashes))
             total += hashes.value
-            time.sleep(0.001)
             if hashes.value == 0:
-                break
+                empty_polls += 1
+                if empty_polls >= 5:
+                    break
+            else:
+                empty_polls = 0
+            time.sleep(0.002)
 
         elapsed = time.perf_counter() - started
         return total, elapsed
