@@ -382,13 +382,9 @@ def start_workers(job):
     return workers, stop_event, result_queue, extranonce2
 
 
-def submit_share(job_id, extranonce2, ntime, nonce):
-    with ctx.pending_submits_lock:
-        submit_id = ctx.next_submit_id
-        ctx.next_submit_id += 1
-        ctx.pending_submits[submit_id] = time.monotonic()
-
-    payload = {
+def submit_payload(job_id, extranonce2, ntime, nonce, submit_id):
+    """Build the exact Stratum mining.submit payload used by submit_share()."""
+    return {
         "id": submit_id,
         "method": "mining.submit",
         "params": [
@@ -399,6 +395,47 @@ def submit_share(job_id, extranonce2, ntime, nonce):
             "%08x" % nonce,
         ],
     }
+
+
+def submit_selftest():
+    """Validate submit payload construction without contacting the pool."""
+    job_id = "selftest-job"
+    extranonce2 = "01020304"
+    ntime = "65abcdef"
+    nonce = 0x12345678
+    submit_id = 4242
+
+    payload = submit_payload(
+        job_id, extranonce2, ntime, nonce, submit_id
+    )
+
+    if payload["method"] != "mining.submit":
+        return False
+    if payload["id"] != submit_id:
+        return False
+    if payload["params"] != [
+        ADDRESS,
+        job_id,
+        extranonce2,
+        ntime,
+        "12345678",
+    ]:
+        return False
+
+    encoded = (json.dumps(payload, separators=(",", ":")) + "\n").encode()
+    decoded = json.loads(encoded.decode("utf-8").strip())
+    return decoded == payload
+
+
+def submit_share(job_id, extranonce2, ntime, nonce):
+    with ctx.pending_submits_lock:
+        submit_id = ctx.next_submit_id
+        ctx.next_submit_id += 1
+        ctx.pending_submits[submit_id] = time.monotonic()
+
+    payload = submit_payload(
+        job_id, extranonce2, ntime, nonce, submit_id
+    )
 
     try:
         with ctx.upstream_send_lock:
@@ -906,6 +943,12 @@ def run():
     print(Fore.WHITE, "[*] CPU threads:", CPU_THREADS)
     print(Fore.WHITE, "[*] Nonce batch:", NONCE_BATCH)
     ensure_native()
+
+    if submit_selftest():
+        print(Fore.GREEN, "[*] Stratum submit payload self-test: PASS")
+    else:
+        print(Fore.RED, "[!] Stratum submit payload self-test: FAILED")
+        raise RuntimeError("Submit payload self-test failed")
 
     while not ctx.fShutdown:
         try:
