@@ -6,11 +6,10 @@ import sys
 import threading
 import tempfile
 
-from miner_logging import StructuredLogger
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from miner_logging import StructuredLogger
 from miner_config import MinerConfig
 from miner_metrics import MinerMetrics
 from miner_state import MinerState, MinerStateMachine
