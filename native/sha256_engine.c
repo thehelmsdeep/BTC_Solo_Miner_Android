@@ -112,9 +112,9 @@ int b_m_mine(const uint8_t prefix[76], const uint8_t target[32],
 #include <process.h>
 #endif
 
-static inline int hash_nonce_fast(const SHA256_CTX *base,
-                                      uint32_t tail0,uint32_t tail1,uint32_t tail2,
-                                      const uint8_t target[32],uint32_t nonce){
+static inline void hash_nonce_fast_digest(const SHA256_CTX *base,
+                                             uint32_t tail0,uint32_t tail1,uint32_t tail2,
+                                             uint32_t nonce,uint8_t digest[32]){
  uint32_t w[16];
  SHA256_CTX a=*base;
  w[0]=tail0; w[1]=tail1; w[2]=tail2; w[3]=BSWAP32(nonce);
@@ -134,7 +134,19 @@ static inline int hash_nonce_fast(const SHA256_CTX *base,
  };
  memcpy(b.h,IV,32);
  transform_words(&b,w);
- return le_target_words(b.h,target);
+ for(int i=0;i<8;i++){
+  digest[i*4]=(uint8_t)(b.h[i]>>24);
+  digest[i*4+1]=(uint8_t)(b.h[i]>>16);
+  digest[i*4+2]=(uint8_t)(b.h[i]>>8);
+  digest[i*4+3]=(uint8_t)b.h[i];
+ }
+}
+static inline int hash_nonce_fast(const SHA256_CTX *base,
+                                  uint32_t tail0,uint32_t tail1,uint32_t tail2,
+                                  const uint8_t target[32],uint32_t nonce){
+ uint8_t digest[32];
+ hash_nonce_fast_digest(base,tail0,tail1,tail2,nonce,digest);
+ return le_target(digest,target);
 }
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86_FP)
 #include <emmintrin.h>
@@ -461,6 +473,30 @@ static int hash_nonce(const uint8_t prefix[76],const SHA256_CTX *base,
  return hash_nonce_fast(base,t0,t1,t2,target,nonce);
 #endif
 }
+/* Debug-only exported cross-check helper. Returns the complete SHA256d
+ * digest from the same optimized nonce path used by mining. */
+void b_m_debug_sha256d_optimized(const uint8_t prefix[76], uint32_t nonce,
+                                 uint8_t digest[32]) {
+ uint8_t header[80];
+ memcpy(header,prefix,76);
+ header[76]=(uint8_t)nonce;
+ header[77]=(uint8_t)(nonce>>8);
+ header[78]=(uint8_t)(nonce>>16);
+ header[79]=(uint8_t)(nonce>>24);
+ SHA256_CTX base;
+ init(&base);
+ update(&base,header,64);
+ const uint8_t *p=prefix+64;
+ uint32_t t0=((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];
+ uint32_t t1=((uint32_t)p[4]<<24)|((uint32_t)p[5]<<16)|((uint32_t)p[6]<<8)|p[7];
+ uint32_t t2=((uint32_t)p[8]<<24)|((uint32_t)p[9]<<16)|((uint32_t)p[10]<<8)|p[11];
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+ hash_nonce_arm_digest(&base,t0,t1,t2,nonce,digest);
+#else
+ hash_nonce_fast_digest(&base,t0,t1,t2,nonce,digest);
+#endif
+}
+
 typedef struct {
  const uint8_t *prefix;
  const uint8_t *target;
