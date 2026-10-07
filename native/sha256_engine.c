@@ -735,7 +735,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
     engine_lock(e);
     memcpy(prefix, e->prefix, 76);
     memcpy(target, e->target, 32);
-    generation = e->job_generation;
+    generation = __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED);
     engine_unlock(e);
 
     init(&base);
@@ -751,10 +751,10 @@ static void engine_scan(BM_ENGINE_ARG *a) {
     }
 
     for (;;) {
-        if (__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
-            __atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
-            !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
-            __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation) {
+        if (__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED) ||
+            __atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED), __ATOMIC_RELAXED) ||
+            !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED), __ATOMIC_RELAXED) ||
+            __atomic_load_n(&__atomic_load_n(&e->job_generation, __ATOMIC_RELAXED), __ATOMIC_RELAXED) != generation) {
             return;
         }
 
@@ -782,18 +782,18 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             local += 8;
             for(int lane=0;lane<8;lane++) if(hits[lane]){
                 engine_lock(e);
-                if(!e->found_valid && !e->stop_job && !e->shutdown){
-                    e->found_valid=1;e->found_nonce=nonces[lane];e->stop_job=1;
+                if(!e->found_valid && !__atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && !__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED)){
+                    e->found_valid=1;e->found_nonce=nonces[lane];__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED)=1;
                 }
                 engine_unlock(e);
                 __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
                 return;
             }
             if((local & 0x3FFFF)==0){
-                int stop=__atomic_load_n(&e->stop_job,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown,__ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation,__ATOMIC_RELAXED) != generation;
+                int stop=__atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         __atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         __atomic_load_n(&__atomic_load_n(&e->job_generation, __ATOMIC_RELAXED),__ATOMIC_RELAXED) != generation;
                 if(stop){if(local)__atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);return;}
             }
         }
@@ -805,20 +805,20 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             local += 4;
             for (int lane=0;lane<4;lane++) if (hits[lane]) {
                 engine_lock(e);
-                if (!e->found_valid && !e->stop_job && !e->shutdown) {
+                if (!e->found_valid && !__atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && !__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED)) {
                     e->found_valid=1;
                     e->found_nonce=nonces[lane];
-                    e->stop_job=1;
+                    __atomic_load_n(&e->stop_job, __ATOMIC_RELAXED)=1;
                 }
                 engine_unlock(e);
                 __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
                 return;
             }
             if ((local & 0x3FFFF)==0) {
-                int stop=__atomic_load_n(&e->stop_job,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown,__ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation,__ATOMIC_RELAXED) != generation;
+                int stop=__atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         __atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         __atomic_load_n(&__atomic_load_n(&e->job_generation, __ATOMIC_RELAXED),__ATOMIC_RELAXED) != generation;
                 if(stop) {
                     if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
                     return;
@@ -829,10 +829,10 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         for (; n < end; ++n) {
             if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
                 engine_lock(e);
-                if (!e->found_valid && !e->stop_job && !e->shutdown) {
+                if (!e->found_valid && !__atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && !__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED)) {
                     e->found_valid=1;
                     e->found_nonce=(uint32_t)n;
-                    e->stop_job=1;
+                    __atomic_load_n(&e->stop_job, __ATOMIC_RELAXED)=1;
                 }
                 engine_unlock(e);
                 __atomic_fetch_add(&e->total_hashes,local+1,__ATOMIC_RELAXED);
@@ -840,10 +840,10 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             }
             ++local;
             if ((local & 0x3FFF)==0) {
-                int stop=__atomic_load_n(&e->stop_job,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown,__ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation,__ATOMIC_RELAXED) != generation;
+                int stop=__atomic_load_n(&__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         __atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED),__ATOMIC_RELAXED) ||
+                         __atomic_load_n(&__atomic_load_n(&e->job_generation, __ATOMIC_RELAXED),__ATOMIC_RELAXED) != generation;
                 if(stop) {
                     if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
                     return;
@@ -856,9 +856,9 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 
         if (end >= 0x100000000ULL) {
             engine_lock(e);
-            if (!e->found_valid && !e->shutdown && e->job_generation == generation) {
+            if (!e->found_valid && !__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                 e->exhausted = 1;
-                e->stop_job = 1;
+                __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
             }
             engine_wake(e);
             engine_unlock(e);
@@ -872,9 +872,9 @@ static unsigned __stdcall engine_thread(void *p) {
     BM_ENGINE *e = ((BM_ENGINE_ARG*)p)->engine;
     while (1) {
         engine_lock(e);
-        while (!e->shutdown && !e->job_ready)
+        while (!__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED), __ATOMIC_RELAXED))
             engine_wait(e);
-        if (e->shutdown) {
+        if (__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
             engine_unlock(e);
             return 0;
         }
@@ -883,7 +883,7 @@ static unsigned __stdcall engine_thread(void *p) {
         engine_scan((BM_ENGINE_ARG*)p);
 
         engine_lock(e);
-        while (!e->shutdown && (e->stop_job || !e->job_ready))
+        while (!__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && (__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) || !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED), __ATOMIC_RELAXED)))
             engine_wait(e);
         engine_unlock(e);
     }
@@ -893,9 +893,9 @@ static void *engine_thread(void *p) {
     BM_ENGINE *e = ((BM_ENGINE_ARG*)p)->engine;
     while (1) {
         engine_lock(e);
-        while (!e->shutdown && !e->job_ready)
+        while (!__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED), __ATOMIC_RELAXED))
             engine_wait(e);
-        if (e->shutdown) {
+        if (__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
             engine_unlock(e);
             return NULL;
         }
@@ -904,7 +904,7 @@ static void *engine_thread(void *p) {
         engine_scan((BM_ENGINE_ARG*)p);
 
         engine_lock(e);
-        while (!e->shutdown && (e->stop_job || !e->job_ready))
+        while (!__atomic_load_n(&__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED), __ATOMIC_RELAXED) && (__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) || !__atomic_load_n(&__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED), __ATOMIC_RELAXED)))
             engine_wait(e);
         engine_unlock(e);
     }
@@ -948,7 +948,7 @@ BM_ENGINE *b_m_engine_create(uint32_t thread_count) {
 #ifdef _WIN32
         uintptr_t h = _beginthreadex(NULL, 0, engine_thread, &e->args[i], 0, NULL);
         if (!h) {
-            engine_lock(e); e->shutdown = 1; engine_wake(e); engine_unlock(e);
+            engine_lock(e); __atomic_store_n(&e->shutdown, 1, __ATOMIC_RELAXED); engine_wake(e); engine_unlock(e);
             for (uint32_t j = 0; j < i; ++j) {
                 WaitForSingleObject(e->threads[j], INFINITE);
                 CloseHandle(e->threads[j]);
@@ -961,7 +961,7 @@ BM_ENGINE *b_m_engine_create(uint32_t thread_count) {
         e->threads[i] = (HANDLE)h;
 #else
         if (pthread_create(&e->threads[i], NULL, engine_thread, &e->args[i]) != 0) {
-            engine_lock(e); e->shutdown = 1; engine_wake(e); engine_unlock(e);
+            engine_lock(e); __atomic_store_n(&e->shutdown, 1, __ATOMIC_RELAXED); engine_wake(e); engine_unlock(e);
             for (uint32_t j = 0; j < i; ++j) pthread_join(e->threads[j], NULL);
             free(e->threads); free(e->args);
             pthread_cond_destroy(&e->cond);
@@ -979,14 +979,14 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
     engine_lock(e);
     memcpy(e->prefix, prefix, 76);
     memcpy(e->target, target, 32);
-    e->job_generation++;
+    __atomic_add_fetch(&e->job_generation, 1, __ATOMIC_RELAXED);
     e->next_nonce = 0;
     e->total_hashes = 0;
     e->found_valid = 0;
     e->found_nonce = 0;
-    e->stop_job = 0;
+    __atomic_store_n(&e->stop_job, 0, __ATOMIC_RELAXED);
     e->exhausted = 0;
-    e->job_ready = 1;
+    __atomic_store_n(&e->job_ready, 1, __ATOMIC_RELAXED);
     engine_wake(e);
     engine_unlock(e);
     return 1;
@@ -1013,8 +1013,8 @@ int b_m_engine_exhausted(BM_ENGINE *e) {
 void b_m_engine_stop_job(BM_ENGINE *e) {
     if (!e) return;
     engine_lock(e);
-    e->stop_job = 1;
-    e->job_ready = 0;
+    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&e->job_ready, 0, __ATOMIC_RELAXED);
     engine_wake(e);
     engine_unlock(e);
 }
@@ -1022,9 +1022,9 @@ void b_m_engine_stop_job(BM_ENGINE *e) {
 void b_m_engine_destroy(BM_ENGINE *e) {
     if (!e) return;
     engine_lock(e);
-    e->shutdown = 1;
-    e->job_ready = 0;
-    e->stop_job = 1;
+    __atomic_store_n(&e->shutdown, 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&e->job_ready, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
     engine_wake(e);
     engine_unlock(e);
 
