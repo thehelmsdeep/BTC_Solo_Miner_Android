@@ -4,6 +4,9 @@
 import os
 import sys
 import threading
+import tempfile
+
+from miner_logging import StructuredLogger
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -84,8 +87,24 @@ def test_metrics():
     check("metrics rejected baseline", snapshot["shares_rejected"] == 0)
 
 
+def test_structured_logging():
+    with tempfile.NamedTemporaryFile() as handle:
+        logger = StructuredLogger(
+            human_path=handle.name,
+            event_path=handle.name + ".jsonl",
+        )
+        record = logger.event("test_event", threads=8, hashes=123)
+        check("structured logging event", record["event"] == "test_event")
+        with open(handle.name + ".jsonl", "r", encoding="utf-8") as stream:
+            line = stream.readline()
+        check("structured logging JSONL", '"event":"test_event"' in line)
+
+
 def main():
     test_config()
+    test_state_machine()
+    test_metrics()
+    test_structured_logging()
     test_state_machine()
     test_metrics()
     print("ENGINEERING FORTRESS: PASS")
