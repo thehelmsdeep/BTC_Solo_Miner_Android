@@ -166,9 +166,16 @@ def check_engine(lib, prefix, nonce):
             if rc != 0:
                 break
 
-        ok = rc != 0 and found.value == nonce and hashes.value >= 1
+        if rc != 0:
+            found_header = prefix + found.value.to_bytes(4, "little")
+            found_digest = hashlib.sha256(hashlib.sha256(found_header).digest()).digest()
+            target_int = int.from_bytes(target, "little")
+            found_int = int.from_bytes(found_digest, "little")
+            ok = hashes.value >= 1 and found_int <= target_int
+        else:
+            ok = False
         return report(
-            "persistent-engine exact-target",
+            "persistent-engine valid-target",
             ok,
             f"rc={rc} found=0x{found.value:08x} hashes={hashes.value}",
         )
