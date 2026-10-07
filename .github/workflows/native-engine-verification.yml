@@ -8,34 +8,60 @@ on:
   workflow_dispatch:
 
 jobs:
-  sanitizer:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        sanitizer: [address-undefined, thread]
+  asan-ubsan:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          set -euxo pipefail
+          clang --version
+          uname -a
       - name: Build sanitizer harness
         shell: bash
         run: |
           set -euxo pipefail
-          if [ "${{ matrix.sanitizer }}" = "address-undefined" ]; then
-            CC=clang
-            FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined"
-          else
-            CC=clang
-            FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=thread"
-          fi
-          "$CC" $FLAGS -pthread -I.             native/sha256_engine.c tests/native_engine_sanitizer.c             -o native-engine-sanitizer
-      - name: Run sanitizer harness
+          clang -O1 -g -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -pthread -I. \
+            native/sha256_engine.c tests/native_engine_sanitizer.c \
+            -o native-engine-sanitizer
+      - name: Run ASan + UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: ./native-engine-sanitizer
+
+  tsan:
+    name: ThreadSanitizer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          set -euxo pipefail
+          gcc --version
+          uname -a
+          uname -m
+      - name: Build TSan harness
         shell: bash
         run: |
           set -euxo pipefail
-          ./native-engine-sanitizer
+          gcc -O1 -g -fno-omit-frame-pointer \
+            -fsanitize=thread -pthread -I. \
+            native/sha256_engine.c tests/native_engine_sanitizer.c \
+            -o native-engine-tsan
+      - name: Run TSan
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1:history_size=7
+        run: |
+          set -euxo pipefail
+          ./native-engine-tsan
 
   python-native:
-    runs-on: ubuntu-latest
+    name: Native Python verification
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
