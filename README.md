@@ -72,6 +72,7 @@ python tests/native_benchmark.py
 python tests/native_engine_verification.py
 python tests/stratum_end_to_end.py
 python tests/reconnect_regression.py
+python tests/network_fortress.py
 ```
 
 The Stratum end-to-end test uses a local socket pair and a fake server. It
@@ -109,3 +110,23 @@ the installed compiler/runtime supports them.
 
 Sanitizers are deliberately manual and local. This repository does **not** use
 GitHub Actions or CI/CD.
+
+
+## Network Fortress (Stage 3)
+
+Run the complete offline Stratum/network regression suite manually:
+
+```bash
+python tests/network_fortress.py
+```
+
+It fuzzes the JSON-line Stratum parser with malformed and binary frames,
+checks fragmented/coalesced TCP framing, validates malformed `mining.notify`
+and `mining.set_extranonce` inputs before shared-state mutation, exercises a
+reconnect matrix with forced upstream failures, races concurrent
+`mining.submit` requests against responses, and stress-tests concurrent job
+replacement/readers for generation consistency.
+
+The suite is fully offline: it uses local socket pairs and deterministic fake
+upstream behavior. It never contacts a real pool and never submits a real
+share.
