@@ -18,7 +18,7 @@ from main import submit_payload, verify_header_pow
 GENESIS_HEADER_PREFIX = bytes.fromhex(
     "01000000"
     + "00" * 32
-    + "4a5e1e4baa8b9fa323518a88c31bc87f618f76773e6c372acb27127afdeda33b3"
+    + "3ba3edfd7a7b12b27ac72c3e67768f617fc81bc388a885123a9f8aa4b1e5e4a"
     + "29ab5f49"
     + "ffff001d"
 )
