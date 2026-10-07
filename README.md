@@ -80,3 +80,13 @@ without contacting a real pool.
 The miner also independently re-verifies every native PoW hit with Python
 SHA256d before submission, rejects stale job-generation hits, expires timed-out
 submit responses, and automatically reconnects after an upstream failure.
+
+## Correctness Fortress (Stage 1)
+
+The project includes an offline consensus-oriented regression suite:
+
+```bash
+python tests/correctness_fortress.py
+```
+
+It covers the Bitcoin mainnet genesis block SHA256d vector, a real block-100000 Merkle-root vector, compact `nBits` zero/sign/overflow semantics, exact-target comparison, full 76-byte header endian serialization, nonce boundary `0xffffffff`, and a native terminal-nonce scan. The suite never opens a network connection or submits a share.
