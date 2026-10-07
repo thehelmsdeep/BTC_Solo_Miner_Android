@@ -17,22 +17,28 @@ from signal import SIGINT, signal
 from colorama import Back, Fore, Style
 
 import miner_context as ctx
+from miner_config import CONFIG
+from miner_metrics import MinerMetrics
+from miner_state import MinerState, MinerStateMachine
 
 
-ADDRESS = os.getenv("BTC_ADDRESS", "bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4")
-UPSTREAM_HOST = os.getenv("STRATUM_HOST", "solo.ckpool.org")
-UPSTREAM_PORT = int(os.getenv("STRATUM_PORT", "3333"))
-WORKER_PASSWORD = os.getenv("WORKER_PASSWORD", "x")
-CPU_THREADS = max(1, int(os.getenv("CPU_THREADS", str(max(1, os.cpu_count() or 1)))))
-NONCE_BATCH = max(10000, int(os.getenv("NONCE_BATCH", "4000000")))
-REPORT_INTERVAL = max(1.0, float(os.getenv("REPORT_INTERVAL", "5")))
-RECONNECT_DELAY = max(1.0, float(os.getenv("RECONNECT_DELAY", "5")))
-SUBMIT_TIMEOUT = max(1.0, float(os.getenv("SUBMIT_TIMEOUT", "15")))
+# Backward-compatible aliases. Configuration ownership lives in miner_config.py.
+ADDRESS = CONFIG.address
+UPSTREAM_HOST = CONFIG.upstream_host
+UPSTREAM_PORT = CONFIG.upstream_port
+WORKER_PASSWORD = CONFIG.worker_password
+CPU_THREADS = CONFIG.cpu_threads
+NONCE_BATCH = CONFIG.nonce_batch
+REPORT_INTERVAL = CONFIG.report_interval
+RECONNECT_DELAY = CONFIG.reconnect_delay
+SUBMIT_TIMEOUT = CONFIG.submit_timeout
 NATIVE_DIR = pathlib.Path(__file__).resolve().parent / "native"
 NATIVE_LIB = NATIVE_DIR / ("b_m_sha256.dll" if os.name == "nt" else "libb_m_sha256.so")
 NATIVE_ENABLED = os.getenv("BM_NATIVE", "1").lower() not in {"0", "false", "no"}
 _native = None
 _native_engine = None
+metrics = MinerMetrics()
+state_machine = MinerStateMachine()
 
 
 def timer():
@@ -511,6 +517,7 @@ def submit_share(job_id, extranonce2, ntime, nonce):
         raise
 
     ctx.shares_submitted += 1
+    metrics.share_submitted()
     logg("[*] Share submitted: id=%s job=%s nonce=%08x" %
          (submit_id, job_id, nonce))
     return submit_id
@@ -583,8 +590,10 @@ def upstream_listener(sock):
                         )
                         if accepted:
                             ctx.shares_accepted += 1
+                            metrics.share_result(True)
                         else:
                             ctx.shares_rejected += 1
+                            metrics.share_result(False)
 
                         elapsed = time.monotonic() - submitted_at
                         if accepted:
@@ -622,6 +631,7 @@ def expire_pending_submits(force=False):
 
     for submit_id in expired:
         ctx.shares_rejected += 1
+        metrics.share_result(False)
         print(Fore.RED, "[!] Share response timeout:", submit_id)
 
 
@@ -876,6 +886,7 @@ def miner_loop():
                 if hashes:
                     hashes_since_report += hashes
                     ctx.total_hashes += hashes
+                    metrics.add_hashes(hashes)
 
                 if hit:
                     # A notify/set_extranonce can arrive while the native engine is
@@ -987,6 +998,7 @@ def miner_loop():
                         hashes = event[2]
                         hashes_since_report += hashes
                         ctx.total_hashes += hashes
+                        metrics.add_hashes(hashes)
 
                     elif event[0] == "found":
                         _, nonce, found_job, found_ntime, hashes = event
@@ -1058,6 +1070,7 @@ def miner_loop():
 
 
 def run():
+    state_machine.reset()
     print(
         Fore.BLUE,
         "--------------~~(",
@@ -1082,6 +1095,7 @@ def run():
 
     while not ctx.fShutdown:
         try:
+            state_machine.transition(MinerState.CONNECTING)
             sock = connect_upstream()
             listener = threading.Thread(
                 target=upstream_listener,
@@ -1089,13 +1103,20 @@ def run():
                 daemon=True,
             )
             listener.start()
+            state_machine.transition(MinerState.CONNECTED)
 
+            state_machine.transition(MinerState.MINING)
             miner_loop()
 
             if ctx.fShutdown:
                 break
 
         except Exception as exc:
+            if state_machine.state != MinerState.STOPPED:
+                try:
+                    state_machine.transition(MinerState.RECONNECTING)
+                except ValueError:
+                    state_machine.reset()
             ctx.connected = False
             ctx.upstream_alive = False
             print(Fore.RED, "[!] Upstream error:", exc)
@@ -1111,8 +1132,15 @@ def run():
             ctx.upstream_sock = None
 
         if not ctx.fShutdown:
+            if state_machine.state != MinerState.RECONNECTING:
+                try:
+                    state_machine.transition(MinerState.RECONNECTING)
+                except ValueError:
+                    state_machine.reset()
             print(Fore.YELLOW, "[*] Reconnecting in %.1f seconds..." % RECONNECT_DELAY)
             time.sleep(RECONNECT_DELAY)
+            if state_machine.state == MinerState.RECONNECTING:
+                state_machine.transition(MinerState.CONNECTING)
 
 
 def main():
