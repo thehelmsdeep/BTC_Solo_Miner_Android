@@ -315,7 +315,7 @@ def test_submit_race():
 
 def test_job_generation_stress():
     reset_context()
-    main.update_job(valid_notify("seed", "00"))
+    main.update_job(valid_notify("job-seed", "00"))
     updates = 8 * 500
     failures = []
     stop = threading.Event()
@@ -327,7 +327,7 @@ def test_job_generation_stress():
                 # Every field carries the same token-derived marker. A reader
                 # that observes mixed generations would fail these checks.
                 marker = ("%s" % token)[-2:]
-                params = valid_notify("job-%s" % token, marker * 32)
+                params = valid_notify("job-%s" % token, marker)
                 main.update_job(params)
         except Exception as exc:
             failures.append(exc)
