@@ -62,9 +62,12 @@ def parse_messages(buffer):
         if not line:
             continue
         try:
-            messages.append(json.loads(line.decode("utf-8")))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            logg("[!] Invalid Stratum JSON: %r" % line)
+            message = json.loads(line.decode("utf-8"))
+            if not isinstance(message, dict):
+                raise ValueError("Stratum message must be a JSON object")
+            messages.append(message)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+            logg("[!] Invalid Stratum JSON/object: %r" % line)
     return messages, buffer
 
 
@@ -551,11 +554,21 @@ def upstream_listener(sock):
 
                 elif method == "mining.set_extranonce":
                     params = msg.get("params", [])
-                    if len(params) >= 2:
+                    try:
+                        if len(params) < 2:
+                            raise ValueError("missing extranonce parameters")
+                        _validate_hex_blob(params[0], "extranonce1")
+                        size = int(params[1])
+                        if not 1 <= size <= 32:
+                            raise ValueError("invalid extranonce2_size")
+                    except (TypeError, ValueError) as exc:
+                        logg("[!] Invalid mining.set_extranonce ignored: %s" % exc)
+                        print(Fore.RED, "[!] Invalid extranonce update ignored:", exc)
+                        continue
+                    with ctx.job_lock:
                         ctx.upstream_extranonce1 = params[0]
-                        ctx.upstream_extranonce2_size = int(params[1])
-                        with ctx.job_lock:
-                            ctx.job_generation += 1
+                        ctx.upstream_extranonce2_size = size
+                        ctx.job_generation += 1
                     print(Fore.CYAN, "[*] Pool extranonce updated")
 
                 elif "id" in msg:
@@ -612,9 +625,53 @@ def expire_pending_submits(force=False):
         print(Fore.RED, "[!] Share response timeout:", submit_id)
 
 
-def update_job(params):
-    if len(params) != 9:
+def _validate_hex(value, length, field):
+    if not isinstance(value, str) or len(value) != length:
+        raise ValueError("Invalid %s length" % field)
+    try:
+        bytes.fromhex(value)
+    except ValueError as exc:
+        raise ValueError("Invalid %s hex" % field) from exc
+
+
+def _validate_hex_blob(value, field):
+    if not isinstance(value, str) or len(value) % 2:
+        raise ValueError("Invalid %s hex" % field)
+    try:
+        bytes.fromhex(value)
+    except ValueError as exc:
+        raise ValueError("Invalid %s hex" % field) from exc
+
+
+def validate_notify_params(params):
+    """Validate a Stratum mining.notify before mutating shared job state."""
+    if not isinstance(params, (list, tuple)) or len(params) != 9:
         raise ValueError("Unexpected mining.notify parameter count")
+
+    (
+        job_id, prevhash, coinb1, coinb2, merkle_branch,
+        version, nbits, ntime, clean_jobs
+    ) = params
+
+    if not isinstance(job_id, str) or not job_id or len(job_id) > 256:
+        raise ValueError("Invalid job_id")
+    _validate_hex(prevhash, 64, "prevhash")
+    _validate_hex_blob(coinb1, "coinb1")
+    _validate_hex_blob(coinb2, "coinb2")
+    if not isinstance(merkle_branch, list) or len(merkle_branch) > 256:
+        raise ValueError("Invalid merkle_branch")
+    for branch in merkle_branch:
+        _validate_hex(branch, 64, "merkle branch")
+    _validate_hex(version, 8, "version")
+    _validate_hex(nbits, 8, "nbits")
+    _validate_hex(ntime, 8, "ntime")
+    if not isinstance(clean_jobs, bool):
+        raise ValueError("Invalid clean_jobs flag")
+    return True
+
+
+def update_job(params):
+    validate_notify_params(params)
 
     (
         job_id, prevhash, coinb1, coinb2, merkle_branch,
@@ -630,7 +687,7 @@ def update_job(params):
         ctx.version = version
         ctx.nbits = nbits
         ctx.ntime = ntime
-        ctx.clean_jobs = bool(clean_jobs)
+        ctx.clean_jobs = clean_jobs
         ctx.job_generation += 1
 
 
