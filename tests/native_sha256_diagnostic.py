@@ -52,38 +52,28 @@ def check_one(lib, prefix, nonce):
     python_digest = hashlib.sha256(hashlib.sha256(header).digest()).digest()
 
     scalar_buf = (ctypes.c_uint8 * 32)()
+    scalar_base_buf = (ctypes.c_uint8 * 32)()
     optimized_buf = (ctypes.c_uint8 * 32)()
-    lib.b_m_debug_sha256d_scalar(
-        ptr(prefix), ctypes.c_uint32(nonce), scalar_buf
-    )
-    lib.b_m_debug_sha256d_optimized(
-        ptr(prefix), ctypes.c_uint32(nonce), optimized_buf
-    )
+    lib.b_m_debug_sha256d_scalar(ptr(prefix), ctypes.c_uint32(nonce), scalar_buf)
+    lib.b_m_debug_sha256d_scalar_base(ptr(prefix), ctypes.c_uint32(nonce), scalar_base_buf)
+    lib.b_m_debug_sha256d_optimized(ptr(prefix), ctypes.c_uint32(nonce), optimized_buf)
     scalar_digest = bytes(scalar_buf)
+    scalar_base_digest = bytes(scalar_base_buf)
     optimized_digest = bytes(optimized_buf)
 
     print()
     print(f"=== nonce 0x{nonce:08x} ===")
-    print(f"header             = {header.hex()}")
-    print(f"python_hash        = {python_digest.hex()}")
-    print(f"native_scalar_hash = {scalar_digest.hex()}")
-    print(f"native_opt_hash    = {optimized_digest.hex()}")
+    print(f"header                 = {header.hex()}")
+    print(f"python_hash            = {python_digest.hex()}")
+    print(f"native_scalar_full     = {scalar_digest.hex()}")
+    print(f"native_scalar_base     = {scalar_base_digest.hex()}")
+    print(f"native_optimized       = {optimized_digest.hex()}")
 
-    ok = report(
-        "scalar SHA256d byte-for-byte",
-        scalar_digest == python_digest,
-        "MATCH" if scalar_digest == python_digest else "MISMATCH",
-    )
-    ok &= report(
-        "optimized SHA256d byte-for-byte",
-        optimized_digest == python_digest,
-        "MATCH" if optimized_digest == python_digest else "MISMATCH",
-    )
-    ok &= report(
-        "scalar vs optimized",
-        scalar_digest == optimized_digest,
-        "MATCH" if scalar_digest == optimized_digest else "MISMATCH",
-    )
+    ok = report("scalar full-header vs Python", scalar_digest == python_digest, "MATCH" if scalar_digest == python_digest else "MISMATCH")
+    ok &= report("scalar base-prefix vs Python", scalar_base_digest == python_digest, "MATCH" if scalar_base_digest == python_digest else "MISMATCH")
+    ok &= report("scalar full vs base-prefix", scalar_digest == scalar_base_digest, "MATCH" if scalar_digest == scalar_base_digest else "MISMATCH")
+    ok &= report("optimized vs Python", optimized_digest == python_digest, "MATCH" if optimized_digest == python_digest else "MISMATCH")
+    ok &= report("optimized vs scalar-base", optimized_digest == scalar_base_digest, "MATCH" if optimized_digest == scalar_base_digest else "MISMATCH")
 
     # Boundary semantics are tested independently of the digest cross-check.
     exact_target = python_digest
