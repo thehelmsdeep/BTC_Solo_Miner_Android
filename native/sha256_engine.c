@@ -1012,7 +1012,13 @@ int b_m_engine_selftest(void) {
     int result = 2;
     for (int i=0; i<200; ++i) {
         if (b_m_engine_poll(e, &found, &hashes)) {
-            result = (found == expected_nonce) ? 0 : 3;
+            if (found == expected_nonce) {
+                result = 0;
+            } else {
+                /* Encode the observed nonce for deterministic diagnostics.
+                 * 300..302 are reserved for persistent-engine failures. */
+                result = 300 + (int)(found & 0xffffU);
+            }
             break;
         }
 #ifdef _WIN32
