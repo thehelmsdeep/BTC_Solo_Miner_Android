@@ -1074,7 +1074,9 @@ int b_m_engine_selftest(void) {
         final(&r2, target);
     }
 
-    BM_ENGINE *e = b_m_engine_create(1);
+    /* Exercise the real multi-thread scheduler as well as the hash path.
+     * Atomic BM_CHUNK allocation must keep worker nonce ranges disjoint. */
+    BM_ENGINE *e = b_m_engine_create(8);
     if (!e) return 1;
     if (!b_m_engine_set_job(e, prefix, target)) {
         b_m_engine_destroy(e);
