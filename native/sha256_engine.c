@@ -557,7 +557,7 @@ static void bm_parallel_run(BM_PARALLEL_ARG *a) {
   * chunk, removes the shared counter increment from the hot hash loop,
   * and guarantees that the global hash limit is not overrun by design.
   */
- while (!*a->stop) {
+ while (!__atomic_load_n(a->stop, __ATOMIC_RELAXED)) {
   uint64_t n = __atomic_fetch_add(a->next_nonce, BM_CHUNK, __ATOMIC_RELAXED);
   if (n >= 0x100000000ULL) return;
 
@@ -569,7 +569,7 @@ static void bm_parallel_run(BM_PARALLEL_ARG *a) {
   if (end > limit) end = limit;
   a->local_hashes = 0;
 
-  for (; n < end && !*a->stop; ++n) {
+  for (; n < end && !__atomic_load_n(a->stop, __ATOMIC_RELAXED); ++n) {
    if (hash_nonce(a->prefix, &a->base, a->target, (uint32_t)n)) {
 #ifdef _WIN32
     if (InterlockedCompareExchange((volatile LONG*)a->found_valid, 1, 0) == 0)
@@ -578,7 +578,7 @@ static void bm_parallel_run(BM_PARALLEL_ARG *a) {
 #endif
     {
      *a->found_nonce = (uint32_t)n;
-     *a->stop = 1;
+     __atomic_store_n(a->stop, 1, __ATOMIC_RELAXED);
     }
     __atomic_fetch_add(a->total_hashes, 1, __ATOMIC_RELAXED);
     return;
