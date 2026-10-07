@@ -150,7 +150,8 @@ def check_engine(lib, prefix, nonce):
 
     try:
         rc = lib.b_m_engine_set_job(engine, ptr(prefix), ptr(target))
-        if rc != 0:
+        # b_m_engine_set_job() returns 1 on success and 0 on failure.
+        if rc != 1:
             return report("persistent-engine-set-job", False, f"rc={rc}")
 
         found = ctypes.c_uint32(0)
