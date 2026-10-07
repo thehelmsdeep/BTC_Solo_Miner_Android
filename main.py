@@ -125,6 +125,9 @@ def ensure_native():
         lib.b_m_engine_selftest.argtypes = []
         lib.b_m_engine_selftest.restype = ctypes.c_int
 
+        lib.b_m_engine_exhausted.argtypes = [ctypes.c_void_p]
+        lib.b_m_engine_exhausted.restype = ctypes.c_int
+
         lib.b_m_engine_create.argtypes = [ctypes.c_uint32]
         lib.b_m_engine_create.restype = ctypes.c_void_p
         lib.b_m_engine_set_job.argtypes = [
@@ -201,6 +204,11 @@ def native_engine_poll(engine):
         engine, ctypes.byref(found), ctypes.byref(hashes)
     )
     return bool(hit), found.value, hashes.value
+
+
+def native_engine_exhausted(engine):
+    lib = ensure_native()
+    return bool(lib and engine and lib.b_m_engine_exhausted(engine))
 
 
 def native_engine_stop_job(engine):
@@ -696,6 +704,24 @@ def miner_loop():
                     continue
 
                 hit, found, hashes = native_engine_poll(engine)
+                if native_engine_exhausted(engine):
+                    # Rotate extranonce2 after the 32-bit nonce space is exhausted.
+                    # This changes the coinbase/merkle root while keeping the
+                    # same Stratum job and lets mining continue indefinitely.
+                    extranonce2_size = int(ctx.upstream_extranonce2_size)
+                    mask = (1 << (8 * extranonce2_size)) - 1
+                    extranonce2 = (time.time_ns() & mask).to_bytes(
+                        extranonce2_size, "big"
+                    ).hex()
+                    header_prefix = build_header_prefix(current_job, extranonce2)
+                    target = compact_to_target(current_job["nbits"])
+                    if not native_engine_set_job(engine, header_prefix, target):
+                        raise RuntimeError("Failed to restart native engine after nonce exhaustion")
+                    print(
+                        Fore.YELLOW,
+                        "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job",
+                    )
+                    continue
                 if hashes:
                     hashes_since_report += hashes
                     ctx.total_hashes += hashes
