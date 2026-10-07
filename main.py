@@ -5,6 +5,7 @@ import logging
 import multiprocessing as mp
 import os
 import pathlib
+import platform
 import shutil
 import subprocess
 import socket
@@ -92,7 +93,12 @@ def ensure_native():
         if os.name == "nt":
             cmd = [compiler, "-O3", "-march=native", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-shared", "-o", str(NATIVE_LIB), str(source_file)]
         else:
-            cmd = [compiler, "-O3", "-march=native", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared", "-o", str(NATIVE_LIB), str(NATIVE_DIR / "sha256_engine.c")]
+            # Android ARM64 devices with the SHA2 extension get explicit
+            # ARMv8 crypto codegen so __ARM_FEATURE_SHA2 is enabled and the
+            # native engine can use SHA256H/SHA256H2/SHA256SU instructions.
+            machine = platform.machine().lower()
+            march = "armv8-a+crypto" if machine in ("aarch64", "arm64") else "native"
+            cmd = [compiler, "-O3", f"-march={march}", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared", "-o", str(NATIVE_LIB), str(NATIVE_DIR / "sha256_engine.c")]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             print(Fore.GREEN, "[*] Native SHA256 engine built")
