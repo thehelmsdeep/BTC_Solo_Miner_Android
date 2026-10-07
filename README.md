@@ -138,7 +138,8 @@ Stage 5 keeps the mining behavior intact while separating engineering concerns:
 - `miner_config.py` owns environment parsing and runtime configuration.
 - `miner_state.py` defines explicit lifecycle states and rejects invalid transitions.
 - `miner_metrics.py` provides thread-safe runtime counters independent of Stratum state.
-- `main.py` keeps backward-compatible configuration aliases while using the new state and metrics layers.
+- `miner_logging.py` keeps the human-readable `miner.log` while emitting structured JSONL events to `miner-events.jsonl` (or `MINER_EVENT_LOG`).
+- `main.py` keeps backward-compatible configuration aliases while using the new state, metrics, and logging layers.
 
 Run the offline Stage 5 regression suite manually:
 
@@ -146,7 +147,7 @@ Run the offline Stage 5 regression suite manually:
 python tests/engineering_fortress.py
 ```
 
-The suite covers configuration parsing/minimums, lifecycle transition rules, and concurrent metrics updates. Stage 5 does not add GitHub Actions or CI/CD.
+The suite covers configuration parsing/minimums, lifecycle transition rules, concurrent metrics updates, and structured event serialization. Stage 5 does not add GitHub Actions or CI/CD.
 
 ### Performance Research (Stage 4)
 
