@@ -69,6 +69,7 @@ python tests/native_sha256_diagnostic.py
 python tests/nonce_submit_integrity.py
 python tests/nonce_partition.py
 python tests/native_benchmark.py
+python tests/native_engine_verification.py
 python tests/stratum_end_to_end.py
 python tests/reconnect_regression.py
 ```
@@ -90,3 +91,21 @@ python tests/correctness_fortress.py
 ```
 
 It covers the Bitcoin mainnet genesis block SHA256d vector, a real block-100000 Merkle-root vector, compact `nBits` zero/sign/overflow semantics, exact-target comparison, full 76-byte header endian serialization, nonce boundary `0xffffffff`, and a native terminal-nonce scan. The suite never opens a network connection or submits a share.
+
+
+### Native Engine Verification (Stage 2)
+
+Run the complete offline native verification suite manually:
+
+```bash
+python tests/native_engine_verification.py
+```
+
+It cross-checks Python hashlib against the scalar, 64-byte-prefix, and optimized
+native SHA256d paths; exercises nonce boundaries and exact-target semantics;
+checks the SIMD/parallel path; repeatedly replaces persistent-engine jobs across
+multiple thread counts; and builds/runs local ASan+UBSan and TSan harnesses when
+the installed compiler/runtime supports them.
+
+Sanitizers are deliberately manual and local. This repository does **not** use
+GitHub Actions or CI/CD.
