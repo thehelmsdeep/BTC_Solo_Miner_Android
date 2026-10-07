@@ -2,9 +2,15 @@
 """Deterministic Stratum end-to-end integration test using a local socket pair."""
 
 import json
+import os
 import socket
+import sys
 import threading
 import time
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 import main
 import miner_context as ctx
