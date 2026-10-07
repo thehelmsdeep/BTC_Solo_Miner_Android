@@ -542,9 +542,10 @@ def upstream_listener(sock):
             messages, buffer = parse_messages(buffer)
 
             for msg in messages:
-                method = msg.get("method")
+                try:
+                    method = msg.get("method")
 
-                if method == "mining.notify":
+                    if method == "mining.notify":
                     try:
                         update_job(msg.get("params", []))
                     except (TypeError, ValueError, KeyError) as exc:
@@ -579,8 +580,8 @@ def upstream_listener(sock):
                         ctx.job_generation += 1
                     print(Fore.CYAN, "[*] Pool extranonce updated")
 
-                elif "id" in msg:
-                    msg_id = msg.get("id")
+                    elif "id" in msg:
+                        msg_id = msg.get("id")
                     with ctx.pending_submits_lock:
                         submitted_at = ctx.pending_submits.pop(msg_id, None)
 
@@ -608,6 +609,9 @@ def upstream_listener(sock):
                               msg_id, elapsed, msg.get("error") or ""))
                     else:
                         logg("[*] Upstream response: %s" % msg)
+                except Exception as exc:
+                    logg("[!] Upstream message handler error: %s" % exc)
+                    print(Fore.RED, "[!] Upstream message ignored:", exc)
 
             expire_pending_submits()
 
