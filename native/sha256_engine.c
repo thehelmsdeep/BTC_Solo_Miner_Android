@@ -324,8 +324,10 @@ static inline void sha256_8_hashes(const SHA256_CTX *base,
 
 /*
  * ARMv8 SHA-256 hardware path.
- * The A07 reports the ARMv8 SHA2 extension, so these intrinsics map to
- * the CPU's SHA-256 instructions rather than the scalar C round function.
+ *
+ * The SHA2 instructions process four rounds at a time.  The message words
+ * below are kept in normal SHA-256 big-endian numeric form, then byte-reversed
+ * into the representation expected by the ARM instructions.
  */
 static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     uint32x4_t state0 = vld1q_u32(&h[0]);
@@ -333,79 +335,37 @@ static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     const uint32x4_t save0 = state0;
     const uint32x4_t save1 = state1;
 
+    uint32x4_t msg[4];
+    for (int i = 0; i < 4; ++i) {
+        uint32x4_t v = vld1q_u32(&w[i * 4]);
+        msg[i] = vreinterpretq_u32_u8(
+            vrev32q_u8(vreinterpretq_u8_u32(v)));
+    }
+
     /*
-     * ARM SHA2 intrinsics consume the message words in the CPU's
-     * little-endian lane representation. Our SHA-256 schedule is stored as
-     * numeric big-endian words, so reverse bytes within each 32-bit lane
-     * before feeding the SHA instructions.
+     * Each iteration consumes W[4*g .. 4*g+3].
+     * For g < 12, update that message vector in-place to the next
+     * schedule group using SHA256SU0/SHA256SU1.
+     *
+     * Keep the old state0 for SHA256H2: both SHA instructions must receive
+     * the same pre-round state.
      */
-    uint32x4_t m0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[0]))));
-    uint32x4_t m1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[4]))));
-    uint32x4_t m2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[8]))));
-    uint32x4_t m3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[12]))));
-    uint32x4_t tmp0, tmp1, tmp2;
+    for (int g = 0; g < 16; ++g) {
+        const int slot = g & 3;
+        uint32x4_t wk = vaddq_u32(msg[slot], vld1q_u32(&K[g * 4]));
+        uint32x4_t old0 = state0;
 
-#define ARM_SHA_ROUND(MSG, KOFF) do { \
-    tmp2 = state0; \
-    tmp0 = vaddq_u32((MSG), vld1q_u32(&K[(KOFF)])); \
-    state0 = vsha256hq_u32(state0, state1, tmp0); \
-    state1 = vsha256h2q_u32(state1, tmp2, tmp0); \
-} while (0)
+        state0 = vsha256hq_u32(state0, state1, wk);
+        state1 = vsha256h2q_u32(state1, old0, wk);
 
-    ARM_SHA_ROUND(m0, 0);
-    m0 = vsha256su0q_u32(m0, m1);
-    m0 = vsha256su1q_u32(m0, m2, m3);
-
-    ARM_SHA_ROUND(m1, 4);
-    m1 = vsha256su0q_u32(m1, m2);
-    m1 = vsha256su1q_u32(m1, m3, m0);
-
-    ARM_SHA_ROUND(m2, 8);
-    m2 = vsha256su0q_u32(m2, m3);
-    m2 = vsha256su1q_u32(m2, m0, m1);
-
-    ARM_SHA_ROUND(m3, 12);
-    m3 = vsha256su0q_u32(m3, m0);
-    m3 = vsha256su1q_u32(m3, m1, m2);
-
-    ARM_SHA_ROUND(m0, 16);
-    m0 = vsha256su0q_u32(m0, m1);
-    m0 = vsha256su1q_u32(m0, m2, m3);
-
-    ARM_SHA_ROUND(m1, 20);
-    m1 = vsha256su0q_u32(m1, m2);
-    m1 = vsha256su1q_u32(m1, m3, m0);
-
-    ARM_SHA_ROUND(m2, 24);
-    m2 = vsha256su0q_u32(m2, m3);
-    m2 = vsha256su1q_u32(m2, m0, m1);
-
-    ARM_SHA_ROUND(m3, 28);
-    m3 = vsha256su0q_u32(m3, m0);
-    m3 = vsha256su1q_u32(m3, m1, m2);
-
-    ARM_SHA_ROUND(m0, 32);
-    m0 = vsha256su0q_u32(m0, m1);
-    m0 = vsha256su1q_u32(m0, m2, m3);
-
-    ARM_SHA_ROUND(m1, 36);
-    m1 = vsha256su0q_u32(m1, m2);
-    m1 = vsha256su1q_u32(m1, m3, m0);
-
-    ARM_SHA_ROUND(m2, 40);
-    m2 = vsha256su0q_u32(m2, m3);
-    m2 = vsha256su1q_u32(m2, m0, m1);
-
-    ARM_SHA_ROUND(m3, 44);
-    m3 = vsha256su0q_u32(m3, m0);
-    m3 = vsha256su1q_u32(m3, m1, m2);
-
-    ARM_SHA_ROUND(m0, 48);
-    ARM_SHA_ROUND(m1, 52);
-    ARM_SHA_ROUND(m2, 56);
-    ARM_SHA_ROUND(m3, 60);
-
-#undef ARM_SHA_ROUND
+        if (g < 12) {
+            const int s1 = (slot + 1) & 3;
+            const int s2 = (slot + 2) & 3;
+            const int s3 = (slot + 3) & 3;
+            msg[slot] = vsha256su0q_u32(msg[slot], msg[s1]);
+            msg[slot] = vsha256su1q_u32(msg[slot], msg[s2], msg[s3]);
+        }
+    }
 
     state0 = vaddq_u32(state0, save0);
     state1 = vaddq_u32(state1, save1);
@@ -414,45 +374,37 @@ static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
 }
 
 static inline void hash_nonce_arm_digest(const SHA256_CTX *base,
-                                        uint32_t tail0, uint32_t tail1, uint32_t tail2,
-                                        uint32_t nonce, uint8_t digest[32]) {
-    uint32_t w[16];
-
-    w[0] = tail0;
-    w[1] = tail1;
-    w[2] = tail2;
-    w[3] = BSWAP32(nonce);
-    w[4] = 0x80000000U;
-    w[5] = 0; w[6] = 0; w[7] = 0; w[8] = 0;
-    w[9] = 0; w[10] = 0; w[11] = 0;
-    w[12] = 0; w[13] = 0; w[14] = 0;
-    w[15] = 0x00000280U;
+                                         uint32_t tail0, uint32_t tail1, uint32_t tail2,
+                                         uint32_t nonce, uint8_t digest[32]) {
+    uint32_t first_block[16] = {
+        tail0, tail1, tail2, BSWAP32(nonce),
+        0x80000000U, 0, 0, 0,
+        0, 0, 0, 0,
+        0, 0, 0, 0x00000280U
+    };
 
     uint32_t first[8];
     memcpy(first, base->h, sizeof(first));
-    arm_sha256_compress(first, w);
+    arm_sha256_compress(first, first_block);
 
-    uint32_t second[16];
-    second[0] = first[0]; second[1] = first[1];
-    second[2] = first[2]; second[3] = first[3];
-    second[4] = first[4]; second[5] = first[5];
-    second[6] = first[6]; second[7] = first[7];
-    second[8] = 0x80000000U;
-    second[9] = 0; second[10] = 0; second[11] = 0;
-    second[12] = 0; second[13] = 0; second[14] = 0;
-    second[15] = 0x00000100U;
+    uint32_t second_block[16] = {
+        first[0], first[1], first[2], first[3],
+        first[4], first[5], first[6], first[7],
+        0x80000000U, 0, 0, 0,
+        0, 0, 0, 0x00000100U
+    };
 
     uint32_t digest_state[8] = {
         0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
         0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
     };
-    arm_sha256_compress(digest_state, second);
+    arm_sha256_compress(digest_state, second_block);
 
     for (int i = 0; i < 8; ++i) {
-        digest[i*4]     = (uint8_t)(digest_state[i] >> 24);
-        digest[i*4 + 1] = (uint8_t)(digest_state[i] >> 16);
-        digest[i*4 + 2] = (uint8_t)(digest_state[i] >> 8);
-        digest[i*4 + 3] = (uint8_t)digest_state[i];
+        digest[i * 4]     = (uint8_t)(digest_state[i] >> 24);
+        digest[i * 4 + 1] = (uint8_t)(digest_state[i] >> 16);
+        digest[i * 4 + 2] = (uint8_t)(digest_state[i] >> 8);
+        digest[i * 4 + 3] = (uint8_t)digest_state[i];
     }
 }
 
@@ -798,437 +750,3 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 engine_unlock(e);
                 __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
                 return;
-            }
-            if((local & 0x3FFFF)==0){
-                int stop=__atomic_load_n(&e->stop_job,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown,__ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation,__ATOMIC_RELAXED) != generation;
-                if(stop){if(local)__atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);return;}
-            }
-        }
-#endif
-        for (; n + 4 <= end; n += 4) {
-            uint32_t nonces[4]={(uint32_t)n,(uint32_t)n+1U,(uint32_t)n+2U,(uint32_t)n+3U};
-            uint8_t hits[4];
-            sha256_4_hashes(&base,tail0,tail1,tail2,nonces,target_words,hits);
-            local += 4;
-            for (int lane=0;lane<4;lane++) if (hits[lane]) {
-                engine_lock(e);
-                if (!e->found_valid && !e->stop_job && !e->shutdown) {
-                    e->found_valid=1;
-                    e->found_nonce=nonces[lane];
-                    e->stop_job=1;
-                }
-                engine_unlock(e);
-                __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
-                return;
-            }
-            if ((local & 0x3FFFF)==0) {
-                int stop=__atomic_load_n(&e->stop_job,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown,__ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation,__ATOMIC_RELAXED) != generation;
-                if(stop) {
-                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
-                    return;
-                }
-            }
-        }
-#endif
-        for (; n < end; ++n) {
-            if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
-                engine_lock(e);
-                if (!e->found_valid && !e->stop_job && !e->shutdown) {
-                    e->found_valid=1;
-                    e->found_nonce=(uint32_t)n;
-                    e->stop_job=1;
-                }
-                engine_unlock(e);
-                __atomic_fetch_add(&e->total_hashes,local+1,__ATOMIC_RELAXED);
-                return;
-            }
-            ++local;
-            if ((local & 0x3FFF)==0) {
-                int stop=__atomic_load_n(&e->stop_job,__ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown,__ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready,__ATOMIC_RELAXED);
-                if(stop) {
-                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
-                    return;
-                }
-            }
-        }
-
-        if (local)
-            __atomic_fetch_add(&e->total_hashes, local, __ATOMIC_RELAXED);
-
-        if (end >= 0x100000000ULL) {
-            engine_lock(e);
-            if (!e->found_valid && !e->shutdown && e->job_generation == generation) {
-                e->exhausted = 1;
-                e->stop_job = 1;
-            }
-            engine_wake(e);
-            engine_unlock(e);
-            return;
-        }
-    }
-}
-
-#ifdef _WIN32
-static unsigned __stdcall engine_thread(void *p) {
-    BM_ENGINE *e = ((BM_ENGINE_ARG*)p)->engine;
-    while (1) {
-        engine_lock(e);
-        while (!e->shutdown && !e->job_ready)
-            engine_wait(e);
-        if (e->shutdown) {
-            engine_unlock(e);
-            return 0;
-        }
-        engine_unlock(e);
-
-        engine_scan((BM_ENGINE_ARG*)p);
-
-        engine_lock(e);
-        while (!e->shutdown && (e->stop_job || !e->job_ready))
-            engine_wait(e);
-        engine_unlock(e);
-    }
-}
-#else
-static void *engine_thread(void *p) {
-    BM_ENGINE *e = ((BM_ENGINE_ARG*)p)->engine;
-    while (1) {
-        engine_lock(e);
-        while (!e->shutdown && !e->job_ready)
-            engine_wait(e);
-        if (e->shutdown) {
-            engine_unlock(e);
-            return NULL;
-        }
-        engine_unlock(e);
-
-        engine_scan((BM_ENGINE_ARG*)p);
-
-        engine_lock(e);
-        while (!e->shutdown && (e->stop_job || !e->job_ready))
-            engine_wait(e);
-        engine_unlock(e);
-    }
-}
-#endif
-
-BM_ENGINE *b_m_engine_create(uint32_t thread_count) {
-    if (thread_count == 0) thread_count = 1;
-    if (thread_count > 64) thread_count = 64;
-
-    BM_ENGINE *e = (BM_ENGINE*)calloc(1, sizeof(BM_ENGINE));
-    if (!e) return NULL;
-    e->thread_count = thread_count;
-
-#ifdef _WIN32
-    InitializeCriticalSection(&e->lock);
-    InitializeConditionVariable(&e->cond);
-    e->threads = (HANDLE*)calloc(thread_count, sizeof(HANDLE));
-#else
-    pthread_mutex_init(&e->lock, NULL);
-    pthread_cond_init(&e->cond, NULL);
-    e->threads = (pthread_t*)calloc(thread_count, sizeof(pthread_t));
-#endif
-    e->args = (BM_ENGINE_ARG*)calloc(thread_count, sizeof(BM_ENGINE_ARG));
-
-    if (!e->threads || !e->args) {
-        free(e->threads); free(e->args);
-#ifdef _WIN32
-        DeleteCriticalSection(&e->lock);
-#else
-        pthread_cond_destroy(&e->cond);
-        pthread_mutex_destroy(&e->lock);
-#endif
-        free(e);
-        return NULL;
-    }
-
-    for (uint32_t i = 0; i < thread_count; ++i) {
-        e->args[i].engine = e;
-        e->args[i].id = i;
-#ifdef _WIN32
-        uintptr_t h = _beginthreadex(NULL, 0, engine_thread, &e->args[i], 0, NULL);
-        if (!h) {
-            engine_lock(e); e->shutdown = 1; engine_wake(e); engine_unlock(e);
-            for (uint32_t j = 0; j < i; ++j) {
-                WaitForSingleObject(e->threads[j], INFINITE);
-                CloseHandle(e->threads[j]);
-            }
-            free(e->threads); free(e->args);
-            DeleteCriticalSection(&e->lock);
-            free(e);
-            return NULL;
-        }
-        e->threads[i] = (HANDLE)h;
-#else
-        if (pthread_create(&e->threads[i], NULL, engine_thread, &e->args[i]) != 0) {
-            engine_lock(e); e->shutdown = 1; engine_wake(e); engine_unlock(e);
-            for (uint32_t j = 0; j < i; ++j) pthread_join(e->threads[j], NULL);
-            free(e->threads); free(e->args);
-            pthread_cond_destroy(&e->cond);
-            pthread_mutex_destroy(&e->lock);
-            free(e);
-            return NULL;
-        }
-#endif
-    }
-    return e;
-}
-
-int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t target[32]) {
-    if (!e) return 0;
-    engine_lock(e);
-    memcpy(e->prefix, prefix, 76);
-    memcpy(e->target, target, 32);
-    e->job_generation++;
-    e->next_nonce = 0;
-    e->total_hashes = 0;
-    e->found_valid = 0;
-    e->found_nonce = 0;
-    e->stop_job = 0;
-    e->exhausted = 0;
-    e->job_ready = 1;
-    engine_wake(e);
-    engine_unlock(e);
-    return 1;
-}
-
-int b_m_engine_poll(BM_ENGINE *e, uint32_t *found, uint64_t *hashes) {
-    if (!e || !found || !hashes) return 0;
-    *hashes = __atomic_exchange_n(&e->total_hashes, 0, __ATOMIC_RELAXED);
-    engine_lock(e);
-    int hit = e->found_valid;
-    if (hit) *found = e->found_nonce;
-    engine_unlock(e);
-    return hit;
-}
-
-int b_m_engine_exhausted(BM_ENGINE *e) {
-    if (!e) return 0;
-    engine_lock(e);
-    int exhausted = e->exhausted;
-    engine_unlock(e);
-    return exhausted;
-}
-
-void b_m_engine_stop_job(BM_ENGINE *e) {
-    if (!e) return;
-    engine_lock(e);
-    e->stop_job = 1;
-    e->job_ready = 0;
-    engine_wake(e);
-    engine_unlock(e);
-}
-
-void b_m_engine_destroy(BM_ENGINE *e) {
-    if (!e) return;
-    engine_lock(e);
-    e->shutdown = 1;
-    e->job_ready = 0;
-    e->stop_job = 1;
-    engine_wake(e);
-    engine_unlock(e);
-
-#ifdef _WIN32
-    for (uint32_t i = 0; i < e->thread_count; ++i) {
-        WaitForSingleObject(e->threads[i], INFINITE);
-        CloseHandle(e->threads[i]);
-    }
-    DeleteCriticalSection(&e->lock);
-#else
-    for (uint32_t i = 0; i < e->thread_count; ++i)
-        pthread_join(e->threads[i], NULL);
-    pthread_cond_destroy(&e->cond);
-    pthread_mutex_destroy(&e->lock);
-#endif
-    free(e->threads);
-    free(e->args);
-    free(e);
-}
-
-
-/* Persistent-engine integration self-test.
- * Returns 0 on success, 1 on create/set-job failure, 2 on timeout,
- * 3 if the engine reports a wrong nonce. */
-int b_m_engine_selftest(void) {
-    uint8_t prefix[76], target[32];
-    for (int i=0;i<76;i++) prefix[i]=(uint8_t)i;
-    /* Use the exact SHA256d of nonce 0 as the target. Nonce 0 is guaranteed
-     * valid, but it is NOT necessarily the first valid nonce: a later nonce
-     * may have a numerically smaller Bitcoin hash. The self-test therefore
-     * validates the engine's reported nonce independently instead of assuming
-     * that nonce 0 must be returned. */
-    memset(target, 0, sizeof(target));
-    {
-        uint8_t header[80], d1[32];
-        SHA256_CTX ref = {0};
-        for (int i = 0; i < 76; ++i) header[i] = prefix[i];
-        memset(header + 76, 0, 4);
-        init(&ref);
-        update(&ref, header, 64);
-        SHA256_CTX r = ref;
-        update(&r, header + 64, 16);
-        final(&r, d1);
-        SHA256_CTX r2;
-        init(&r2);
-        update(&r2, d1, 32);
-        final(&r2, target);
-    }
-
-    BM_ENGINE *e = b_m_engine_create(1);
-    if (!e) return 1;
-    if (!b_m_engine_set_job(e, prefix, target)) {
-        b_m_engine_destroy(e);
-        return 1;
-    }
-
-
-    uint32_t found = 0;
-    uint64_t hashes = 0;
-    int result = 2;
-    for (int i=0; i<200; ++i) {
-        if (b_m_engine_poll(e, &found, &hashes)) {
-            /* Independently recompute SHA256d for the reported nonce. This
-             * catches false-positive engine hits while allowing a valid nonce
-             * other than zero (which is expected for an inclusive target). */
-            uint8_t hdr[80], d1[32], d2[32];
-            memcpy(hdr, prefix, 76);
-            hdr[76] = (uint8_t)found;
-            hdr[77] = (uint8_t)(found >> 8);
-            hdr[78] = (uint8_t)(found >> 16);
-            hdr[79] = (uint8_t)(found >> 24);
-            SHA256_CTX r1;
-            init(&r1);
-            update(&r1, hdr, 80);
-            final(&r1, d1);
-            SHA256_CTX r2;
-            init(&r2);
-            update(&r2, d1, 32);
-            final(&r2, d2);
-            result = le_target(d2, target) ? 0 : 400 + (int)(found & 0xffffU);
-            break;
-        }
-#ifdef _WIN32
-        Sleep(1);
-#else
-        struct timespec ts = {0, 1000000L};
-        nanosleep(&ts, NULL);
-#endif
-    }
-    b_m_engine_destroy(e);
-    return result;
-}
-
-/* Built-in correctness self-test.
- * Return codes identify the failing optimized path:
- * 1 = SHA256d/fast path, 2 = SSE2 path, 3 = AVX2 path, 4 = ARM SHA2 path. */
-int b_m_selftest(void) {
-    uint8_t prefix[76], target[32], header[80], d1[32], expected[32];
-    const uint32_t nonce = 0x12345678U;
-    static const uint8_t expected_digest[32] = {
-        0xb9,0x5e,0x5a,0x66,0x20,0x5c,0xb3,0x42,
-        0x7c,0x2a,0xb6,0x40,0x0b,0xf8,0xbb,0x52,
-        0xbc,0x9f,0x0c,0x86,0x11,0x09,0x33,0x85,
-        0x31,0x3f,0x7c,0x2d,0x1a,0xd8,0xd0,0x79
-    };
-
-    for (int i = 0; i < 76; ++i) prefix[i] = (uint8_t)i;
-    memcpy(header, prefix, 76);
-    header[76]=(uint8_t)nonce; header[77]=(uint8_t)(nonce>>8);
-    header[78]=(uint8_t)(nonce>>16); header[79]=(uint8_t)(nonce>>24);
-
-    SHA256_CTX base;
-    init(&base);
-    update(&base, prefix, 64);
-
-    SHA256_CTX a = base;
-    update(&a, header + 64, 16);
-    final(&a, d1);
-    SHA256_CTX b;
-    init(&b);
-    update(&b, d1, 32);
-    final(&b, expected);
-
-    if (memcmp(expected, expected_digest, 32) != 0) return -1;
-
-    memcpy(target, expected, 32);
-    uint32_t t0=((uint32_t)prefix[64]<<24)|((uint32_t)prefix[65]<<16)|((uint32_t)prefix[66]<<8)|prefix[67];
-    uint32_t t1=((uint32_t)prefix[68]<<24)|((uint32_t)prefix[69]<<16)|((uint32_t)prefix[70]<<8)|prefix[71];
-    uint32_t t2=((uint32_t)prefix[72]<<24)|((uint32_t)prefix[73]<<16)|((uint32_t)prefix[74]<<8)|prefix[75];
-
-    if (!hash_nonce_fast(&base, t0, t1, t2, target, nonce)) return 1;
-
-    /* Boundary-test the optimized nonce path at several nonce values.
-     * A single golden nonce is not enough: broken SHA2/NEON state handling
-     * can accidentally pass one vector while failing other nonces. */
-    {
-        static const uint32_t test_nonces[] = {
-            0U, 1U, 0x12345678U, 0x80000000U, 0xffffffffU
-        };
-        for (size_t ti = 0; ti < sizeof(test_nonces)/sizeof(test_nonces[0]); ++ti) {
-            uint32_t n = test_nonces[ti];
-            uint8_t hdr[80], d[32], lower[32];
-            memcpy(hdr, prefix, 76);
-            hdr[76] = (uint8_t)n;
-            hdr[77] = (uint8_t)(n >> 8);
-            hdr[78] = (uint8_t)(n >> 16);
-            hdr[79] = (uint8_t)(n >> 24);
-
-            SHA256_CTX x = base;
-            update(&x, hdr + 64, 16);
-            final(&x, d);
-            SHA256_CTX y;
-            init(&y);
-            update(&y, d, 32);
-            final(&y, d);
-
-            if (!hash_nonce(&prefix[0], &base, d, n)) return 1;
-
-            memcpy(lower, d, 32);
-            for (int j = 0; j < 32; ++j) {
-                if (lower[j] != 0) {
-                    --lower[j];
-                    break;
-                }
-                lower[j] = 0xff;
-            }
-            if (hash_nonce(&prefix[0], &base, lower, n)) return 1;
-        }
-    }
-
-#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
-    {
-        uint8_t arm_digest[32];
-        hash_nonce_arm_digest(&base, t0, t1, t2, nonce, arm_digest);
-        if (memcmp(arm_digest, expected_digest, 32) != 0) return 4;
-        if (!hash_nonce_arm(&base, t0, t1, t2, target, nonce)) return 4;
-    }
-#endif
-
-#if defined(__AVX2__)
-    {
-        uint32_t ns[8]={nonce,nonce+1U,nonce+2U,nonce+3U,nonce+4U,nonce+5U,nonce+6U,nonce+7U};
-        uint32_t tw[8]; uint8_t hits[8];
-        for(int i=0;i<8;i++) tw[i]=(uint32_t)target[i*4]|((uint32_t)target[i*4+1]<<8)|((uint32_t)target[i*4+2]<<16)|((uint32_t)target[i*4+3]<<24);
-        sha256_8_hashes(&base,t0,t1,t2,ns,tw,hits);
-        if(!hits[0]) return 3;
-    }
-#elif defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86_FP)
-    {
-        uint32_t ns[4]={nonce,nonce+1U,nonce+2U,nonce+3U};
-        uint32_t tw[8]; uint8_t hits[4];
-        for(int i=0;i<8;i++) tw[i]=(uint32_t)target[i*4]|((uint32_t)target[i*4+1]<<8)|((uint32_t)target[i*4+2]<<16)|((uint32_t)target[i*4+3]<<24);
-        sha256_4_hashes(&base,t0,t1,t2,ns,tw,hits);
-        if(!hits[0]) return 2;
-    }
-#endif
-    return 0;
-}
