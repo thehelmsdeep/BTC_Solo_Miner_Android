@@ -319,7 +319,7 @@ def test_submit_race():
 
 def test_job_generation_stress():
     reset_context()
-    main.update_job(valid_notify("job-seed", "00"))
+    main.update_job(valid_notify("job-seed", "ed"))
     updates = 8 * 500
     failures = []
     stop = threading.Event()
