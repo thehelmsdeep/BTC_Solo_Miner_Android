@@ -130,3 +130,36 @@ replacement/readers for generation consistency.
 The suite is fully offline: it uses local socket pairs and deterministic fake
 upstream behavior. It never contacts a real pool and never submits a real
 share.
+
+### Performance Research (Stage 4)
+
+Run the reproducible offline performance benchmark manually:
+
+```bash
+python tests/performance_benchmark.py
+```
+
+By default it measures the persistent native engine at 1, 2, 4, ... threads
+up to the available logical CPU count, with two 2-second runs per setting. It
+reports median/min/max H/s, speedup versus one thread, and scaling efficiency.
+
+For a longer, thermal/throttling-oriented run:
+
+```bash
+python tests/performance_benchmark.py --duration 5 --repeats 3 --sustained 60 --json results/stage4.json
+```
+
+Or select exact thread counts:
+
+```bash
+python tests/performance_benchmark.py --threads 1,2,4,8
+```
+
+The benchmark uses a deterministic 76-byte header prefix and an impossible
+all-zero target, so it cannot stop early on a valid PoW. It measures the
+persistent native engine directly, does not contact a pool, and never submits
+shares. When Linux/Termux exposes CPU frequency/governor or thermal-zone
+telemetry, those snapshots are included in the report; unavailable sensors
+are simply omitted. JSON output is intended for reproducible comparisons
+across devices, compiler/runtime versions, and thermal conditions.
+
