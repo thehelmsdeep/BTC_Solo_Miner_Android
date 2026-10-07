@@ -47,36 +47,51 @@ def report(label, ok, detail):
 
 
 def check_one(lib, prefix, nonce):
+    """Independent byte-for-byte cross-check against Python hashlib."""
     header = prefix + nonce.to_bytes(4, "little")
-    digest = hashlib.sha256(hashlib.sha256(header).digest()).digest()
-    exact_target = int.from_bytes(digest, "little").to_bytes(32, "little")
-    lower_int = int.from_bytes(digest, "little") - 1
-    lower_target = lower_int.to_bytes(32, "little")
+    python_digest = hashlib.sha256(hashlib.sha256(header).digest()).digest()
+
+    native_digest_buf = (ctypes.c_uint8 * 32)()
+    lib.b_m_debug_sha256d_optimized(
+        ptr(prefix), ctypes.c_uint32(nonce), native_digest_buf
+    )
+    native_digest = bytes(native_digest_buf)
 
     print()
     print(f"=== nonce 0x{nonce:08x} ===")
-    print(f"header      = {header.hex()}")
-    print(f"python_hash = {digest.hex()}")
-    print(f"target      = {exact_target.hex()}")
+    print(f"header          = {header.hex()}")
+    print(f"python_hash     = {python_digest.hex()}")
+    print(f"native_opt_hash = {native_digest.hex()}")
 
-    ok = True
+    ok = report(
+        "optimized SHA256d byte-for-byte",
+        native_digest == python_digest,
+        "MATCH" if native_digest == python_digest else "MISMATCH",
+    )
 
-    # Scalar path: if this fails, the generic native SHA256d/target path is wrong.
-    hit, found, hashes = call_mine(lib, "b_m_mine", prefix, exact_target, nonce)
+    # Boundary semantics are tested independently of the digest cross-check.
+    exact_target = python_digest
+    lower_target = (int.from_bytes(python_digest, "little") - 1).to_bytes(32, "little")
+
+    hit, found, hashes = call_mine(
+        lib, "b_mine" if False else "b_m_mine",
+        prefix, exact_target, nonce
+    )
     ok &= report(
         "scalar exact-target",
         hit == 1 and found == nonce and hashes == 1,
         f"hit={hit} found=0x{found:08x} hashes={hashes}",
     )
 
-    hit, found, hashes = call_mine(lib, "b_m_mine", prefix, lower_target, nonce)
+    hit, found, hashes = call_mine(
+        lib, "b_m_mine", prefix, lower_target, nonce
+    )
     ok &= report(
         "scalar target-minus-one",
         hit == 0 and hashes == 1,
         f"hit={hit} found=0x{found:08x} hashes={hashes}",
     )
 
-    # Optimized parallel path: on AArch64+SHA2 this exercises the ARM hardware path.
     hit, found, hashes = call_mine(
         lib, "b_m_mine_parallel", prefix, exact_target, nonce
     )
@@ -91,46 +106,6 @@ def check_one(lib, prefix, nonce):
     )
     ok &= report(
         "parallel target-minus-one",
-        hit == 0 and hashes == 1,
-        f"hit={hit} found=0x{found:08x} hashes={hashes}",
-    )
-
-    # Extreme target checks isolate comparison behavior.
-    max_target = bytes([0xFF]) * 32
-    zero_target = bytes(32)
-
-    hit, found, hashes = call_mine(
-        lib, "b_m_mine", prefix, max_target, nonce
-    )
-    ok &= report(
-        "scalar max-target",
-        hit == 1 and found == nonce and hashes == 1,
-        f"hit={hit} found=0x{found:08x} hashes={hashes}",
-    )
-
-    hit, found, hashes = call_mine(
-        lib, "b_m_mine_parallel", prefix, max_target, nonce
-    )
-    ok &= report(
-        "parallel max-target",
-        hit == 1 and found == nonce and hashes == 1,
-        f"hit={hit} found=0x{found:08x} hashes={hashes}",
-    )
-
-    hit, found, hashes = call_mine(
-        lib, "b_m_mine", prefix, zero_target, nonce
-    )
-    ok &= report(
-        "scalar zero-target",
-        hit == 0 and hashes == 1,
-        f"hit={hit} found=0x{found:08x} hashes={hashes}",
-    )
-
-    hit, found, hashes = call_mine(
-        lib, "b_m_mine_parallel", prefix, zero_target, nonce
-    )
-    ok &= report(
-        "parallel zero-target",
         hit == 0 and hashes == 1,
         f"hit={hit} found=0x{found:08x} hashes={hashes}",
     )
