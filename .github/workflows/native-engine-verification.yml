@@ -1,0 +1,47 @@
+name: Native Engine Verification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sanitizer:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [address-undefined, thread]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sanitizer harness
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ "${{ matrix.sanitizer }}" = "address-undefined" ]; then
+            CC=clang
+            FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined"
+          else
+            CC=clang
+            FLAGS="-O1 -g -fno-omit-frame-pointer -fsanitize=thread"
+          fi
+          "$CC" $FLAGS -pthread -I.             native/sha256_engine.c tests/native_engine_sanitizer.c             -o native-engine-sanitizer
+      - name: Run sanitizer harness
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ./native-engine-sanitizer
+
+  python-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Native diagnostic
+        run: python tests/native_sha256_diagnostic.py
+      - name: Persistent engine stress
+        run: python tests/native_engine_stress.py
