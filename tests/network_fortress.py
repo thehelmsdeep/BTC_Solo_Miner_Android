@@ -67,6 +67,8 @@ def reset_context():
 
 def test_parser_fuzz():
     rng = random.Random(0xBEEF)
+    original_logg = main.logg
+    main.logg = lambda _msg: None
     corpus = [
         b"\n",
         b"null\n",
@@ -85,12 +87,13 @@ def test_parser_fuzz():
         raw = bytes(rng.randrange(256) for _ in range(length))
         corpus.append(raw + b"\n")
 
-    for raw in corpus:
-        messages, remainder = main.parse_messages(raw)
-        check("parser remainder type", isinstance(remainder, bytes))
-        check("parser output objects", all(isinstance(x, dict) for x in messages))
+    try:
+        for raw in corpus:
+            messages, remainder = main.parse_messages(raw)
+            assert isinstance(remainder, bytes)
+            assert all(isinstance(x, dict) for x in messages)
 
-    # Fragmentation/coalescing: multiple valid frames must survive arbitrary
+        # Fragmentation/coalescing: multiple valid frames must survive arbitrary
     # packet boundaries exactly as they would on a TCP stream.
     frames = [
         {"id": 1, "method": "mining.subscribe", "params": []},
@@ -99,12 +102,15 @@ def test_parser_fuzz():
     ]
     stream = b"".join((json.dumps(x, separators=(",", ":")) + "\n").encode()
                        for x in frames)
-    for split in range(len(stream) + 1):
-        left, right = stream[:split], stream[split:]
-        first, rem = main.parse_messages(left)
-        second, rem2 = main.parse_messages(rem + right)
-        check("parser fragmented stream", first + second == frames and rem2 == b"")
-    print("PASS: deterministic Stratum parser fuzz corpus=2010")
+        for split in range(len(stream) + 1):
+            left, right = stream[:split], stream[split:]
+            first, rem = main.parse_messages(left)
+            second, rem2 = main.parse_messages(rem + right)
+            assert first + second == frames and rem2 == b""
+        check("Stratum parser fuzz + TCP framing", True,
+              "malformed_frames=2010 fragmented_splits=%d" % (len(stream) + 1))
+    finally:
+        main.logg = original_logg
 
 
 def test_malformed_messages():
