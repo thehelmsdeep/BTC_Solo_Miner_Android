@@ -270,8 +270,8 @@ def main_test():
         for rep in range(args.repeats):
             run = one_run(lib, count, args.duration)
             runs.append(run)
-            print("  %2dT run %d/%d: %,.2f H/s (%d hashes)" %
-                  (count, rep + 1, args.repeats, run["hashrate_hps"], run["hashes"]))
+            print("  %2dT run %d/%d: %s H/s (%d hashes)" %
+                  (count, rep + 1, args.repeats, format(run["hashrate_hps"], ",.2f"), run["hashes"]))
         summary = summarize(runs)
         summaries.append(summary)
 
@@ -284,8 +284,8 @@ def main_test():
         efficiency = speedup / item["threads"] * 100.0
         item["speedup_vs_1t"] = speedup
         item["scaling_efficiency_pct"] = efficiency
-        print("%-8d %,-16.2f %-14.3fx %-14.1f%%" %
-              (item["threads"], item["median_hps"], speedup, efficiency))
+        print("%-8d %-16s %-14.3fx %-14.1f%%" %
+              (item["threads"], format(item["median_hps"], ",.2f"), speedup, efficiency))
 
     sustained_result = None
     if args.sustained:
@@ -293,8 +293,8 @@ def main_test():
         print("")
         print("SUSTAINED RUN: %d threads for %.1fs" % (count, args.sustained))
         sustained_result = sustained(lib, count, args.sustained)
-        print("  %dT: %,.2f H/s | %d hashes" %
-              (count, sustained_result["hashrate_hps"], sustained_result["hashes"]))
+        print("  %dT: %s H/s | %d hashes" %
+              (count, format(sustained_result["hashrate_hps"], ",.2f"), sustained_result["hashes"]))
         if sustained_result["thermal_before"] or sustained_result["thermal_after"]:
             print("  thermal before:", sustained_result["thermal_before"])
             print("  thermal after: ", sustained_result["thermal_after"])
