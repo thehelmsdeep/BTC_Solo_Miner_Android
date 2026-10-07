@@ -26,6 +26,8 @@ WORKER_PASSWORD = os.getenv("WORKER_PASSWORD", "x")
 CPU_THREADS = max(1, int(os.getenv("CPU_THREADS", str(max(1, os.cpu_count() or 1)))))
 NONCE_BATCH = max(10000, int(os.getenv("NONCE_BATCH", "4000000")))
 REPORT_INTERVAL = max(1.0, float(os.getenv("REPORT_INTERVAL", "5")))
+RECONNECT_DELAY = max(1.0, float(os.getenv("RECONNECT_DELAY", "5")))
+SUBMIT_TIMEOUT = max(1.0, float(os.getenv("SUBMIT_TIMEOUT", "15")))
 NATIVE_DIR = pathlib.Path(__file__).resolve().parent / "native"
 NATIVE_LIB = NATIVE_DIR / ("b_m_sha256.dll" if os.name == "nt" else "libb_m_sha256.so")
 NATIVE_ENABLED = os.getenv("BM_NATIVE", "1").lower() not in {"0", "false", "no"}
@@ -502,7 +504,12 @@ def upstream_listener(sock):
                 method = msg.get("method")
 
                 if method == "mining.notify":
-                    update_job(msg.get("params", []))
+                    try:
+                        update_job(msg.get("params", []))
+                    except (TypeError, ValueError, KeyError) as exc:
+                        logg("[!] Invalid mining.notify ignored: %s" % exc)
+                        print(Fore.RED, "[!] Invalid mining job ignored:", exc)
+                        continue
                     print(Fore.YELLOW, "[*] New mining job:", ctx.job_id)
 
                 elif method == "mining.set_difficulty":
@@ -566,7 +573,7 @@ def expire_pending_submits(force=False):
 
     with ctx.pending_submits_lock:
         for submit_id, submitted_at in list(ctx.pending_submits.items()):
-            if force or now - submitted_at > 15:
+            if force or now - submitted_at > SUBMIT_TIMEOUT:
                 expired.append(submit_id)
                 del ctx.pending_submits[submit_id]
 
@@ -784,6 +791,16 @@ def miner_loop():
                     ctx.total_hashes += hashes
 
                 if hit:
+                    # A notify/set_extranonce can arrive while the native engine is
+                    # finishing a polling interval. Never submit a hit from an old
+                    # generation under the new job metadata.
+                    latest = globals()["current_job"]()
+                    if latest is None or latest["generation"] != current_generation:
+                        logg("[!] Discarding stale native hit: job=%s nonce=%08x" %
+                             (current_job["job_id"], found))
+                        native_engine_stop_job(engine)
+                        waiting_for_new_job = True
+                        continue
                     print()
                     print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                           "==============================================================")
@@ -959,6 +976,7 @@ def run():
           "%s:%s" % (UPSTREAM_HOST, UPSTREAM_PORT))
     print(Fore.WHITE, "[*] CPU threads:", CPU_THREADS)
     print(Fore.WHITE, "[*] Nonce batch:", NONCE_BATCH)
+    print(Fore.WHITE, "[*] Reconnect delay:", RECONNECT_DELAY, "s")
     ensure_native()
 
     if submit_selftest():
@@ -998,8 +1016,8 @@ def run():
             ctx.upstream_sock = None
 
         if not ctx.fShutdown:
-            print(Fore.YELLOW, "[*] Reconnecting in 5 seconds...")
-            time.sleep(5)
+            print(Fore.YELLOW, "[*] Reconnecting in %.1f seconds..." % RECONNECT_DELAY)
+            time.sleep(RECONNECT_DELAY)
 
 
 def main():
