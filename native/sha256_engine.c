@@ -333,10 +333,16 @@ static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     const uint32x4_t save0 = state0;
     const uint32x4_t save1 = state1;
 
-    uint32x4_t m0 = vld1q_u32(&w[0]);
-    uint32x4_t m1 = vld1q_u32(&w[4]);
-    uint32x4_t m2 = vld1q_u32(&w[8]);
-    uint32x4_t m3 = vld1q_u32(&w[12]);
+    /*
+     * ARM SHA2 intrinsics consume the message words in the CPU's
+     * little-endian lane representation. Our SHA-256 schedule is stored as
+     * numeric big-endian words, so reverse bytes within each 32-bit lane
+     * before feeding the SHA instructions.
+     */
+    uint32x4_t m0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[0]))));
+    uint32x4_t m1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[4]))));
+    uint32x4_t m2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[8]))));
+    uint32x4_t m3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(vld1q_u32(&w[12]))));
     uint32x4_t tmp0, tmp1, tmp2;
 
 #define ARM_SHA_ROUND(MSG, KOFF) do { \
