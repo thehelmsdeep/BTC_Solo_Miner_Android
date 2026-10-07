@@ -308,13 +308,145 @@ static inline void sha256_8_hashes(const SHA256_CTX *base,
 
 #endif
 
+
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+#include <arm_neon.h>
+
+/*
+ * ARMv8 SHA-256 hardware path.
+ * The A07 reports the ARMv8 SHA2 extension, so these intrinsics map to
+ * the CPU's SHA-256 instructions rather than the scalar C round function.
+ */
+static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
+    uint32x4_t state0 = vld1q_u32(&h[0]);
+    uint32x4_t state1 = vld1q_u32(&h[4]);
+    const uint32x4_t save0 = state0;
+    const uint32x4_t save1 = state1;
+
+    uint32x4_t m0 = vld1q_u32(&w[0]);
+    uint32x4_t m1 = vld1q_u32(&w[4]);
+    uint32x4_t m2 = vld1q_u32(&w[8]);
+    uint32x4_t m3 = vld1q_u32(&w[12]);
+    uint32x4_t tmp0, tmp1, tmp2;
+
+#define ARM_SHA_ROUND(MSG, KOFF) do { \
+    tmp2 = state0; \
+    tmp0 = vaddq_u32((MSG), vld1q_u32(&K[(KOFF)])); \
+    state0 = vsha256hq_u32(state0, state1, tmp0); \
+    state1 = vsha256h2q_u32(state1, tmp2, tmp0); \
+} while (0)
+
+    ARM_SHA_ROUND(m0, 0);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+
+    ARM_SHA_ROUND(m1, 4);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+
+    ARM_SHA_ROUND(m2, 8);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+
+    ARM_SHA_ROUND(m3, 12);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+
+    ARM_SHA_ROUND(m0, 16);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+
+    ARM_SHA_ROUND(m1, 20);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+
+    ARM_SHA_ROUND(m2, 24);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+
+    ARM_SHA_ROUND(m3, 28);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+
+    ARM_SHA_ROUND(m0, 32);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+
+    ARM_SHA_ROUND(m1, 36);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+
+    ARM_SHA_ROUND(m2, 40);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+
+    ARM_SHA_ROUND(m3, 44);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+
+    ARM_SHA_ROUND(m0, 48);
+    ARM_SHA_ROUND(m1, 52);
+    ARM_SHA_ROUND(m2, 56);
+    ARM_SHA_ROUND(m3, 60);
+
+#undef ARM_SHA_ROUND
+
+    state0 = vaddq_u32(state0, save0);
+    state1 = vaddq_u32(state1, save1);
+    vst1q_u32(&h[0], state0);
+    vst1q_u32(&h[4], state1);
+}
+
+static inline int hash_nonce_arm(const SHA256_CTX *base,
+                                 uint32_t tail0, uint32_t tail1, uint32_t tail2,
+                                 const uint8_t target[32], uint32_t nonce) {
+    uint32_t w[16];
+
+    w[0] = tail0;
+    w[1] = tail1;
+    w[2] = tail2;
+    w[3] = BSWAP32(nonce);
+    w[4] = 0x80000000U;
+    w[5] = 0; w[6] = 0; w[7] = 0; w[8] = 0;
+    w[9] = 0; w[10] = 0; w[11] = 0;
+    w[12] = 0; w[13] = 0; w[14] = 0;
+    w[15] = 0x00000280U;
+
+    uint32_t first[8];
+    memcpy(first, base->h, sizeof(first));
+    arm_sha256_compress(first, w);
+
+    uint32_t second[16];
+    second[0] = first[0]; second[1] = first[1];
+    second[2] = first[2]; second[3] = first[3];
+    second[4] = first[4]; second[5] = first[5];
+    second[6] = first[6]; second[7] = first[7];
+    second[8] = 0x80000000U;
+    second[9] = 0; second[10] = 0; second[11] = 0;
+    second[12] = 0; second[13] = 0; second[14] = 0;
+    second[15] = 0x00000100U;
+
+    uint32_t digest_state[8] = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
+        0x510e527fU, 0x9b05688cU, 0x1f83d9abU, 0x5be0cd19U
+    };
+    arm_sha256_compress(digest_state, second);
+
+    return le_target_words(digest_state, target);
+}
+#endif
+
 static int hash_nonce(const uint8_t prefix[76],const SHA256_CTX *base,
                       const uint8_t target[32],uint32_t nonce){
  uint32_t t0,t1,t2; const uint8_t *p=prefix+64;
  t0=((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];
  t1=((uint32_t)p[4]<<24)|((uint32_t)p[5]<<16)|((uint32_t)p[6]<<8)|p[7];
  t2=((uint32_t)p[8]<<24)|((uint32_t)p[9]<<16)|((uint32_t)p[10]<<8)|p[11];
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+ return hash_nonce_arm(base,t0,t1,t2,target,nonce);
+#else
  return hash_nonce_fast(base,t0,t1,t2,target,nonce);
+#endif
 }
 typedef struct {
  const uint8_t *prefix;
