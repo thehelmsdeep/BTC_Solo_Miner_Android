@@ -78,6 +78,36 @@ def double_sha256(data):
     return hashlib.sha256(hashlib.sha256(data).digest()).digest()
 
 
+def compute_merkle_root(tx_hashes):
+    """Compute a Bitcoin Merkle root from display-order transaction IDs.
+
+    tx_hashes are conventional 64-hex-character txids as displayed by Bitcoin
+    explorers. Internally Bitcoin hashes are byte-reversed before pairwise
+    double-SHA256 hashing; the final root is returned in display order.
+    """
+    if not tx_hashes:
+        raise ValueError("Merkle tree requires at least one transaction hash")
+
+    level = []
+    for txid in tx_hashes:
+        if not isinstance(txid, str) or len(txid) != 64:
+            raise ValueError("Invalid transaction hash")
+        try:
+            level.append(bytes.fromhex(txid)[::-1])
+        except ValueError as exc:
+            raise ValueError("Invalid transaction hash hex") from exc
+
+    while len(level) > 1:
+        if len(level) & 1:
+            level.append(level[-1])
+        level = [
+            double_sha256(level[i] + level[i + 1])
+            for i in range(0, len(level), 2)
+        ]
+
+    return level[0][::-1].hex()
+
+
 def ensure_native():
     global _native
     if not NATIVE_ENABLED or _native is not None:
