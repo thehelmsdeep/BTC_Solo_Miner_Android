@@ -831,7 +831,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #endif
         for (; n < end; ++n) {
-            if (hash_nonce(&prefix, &base, target, (uint32_t)n)) {
+            if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !e->stop_job && !e->shutdown) {
                     e->found_valid=1;
