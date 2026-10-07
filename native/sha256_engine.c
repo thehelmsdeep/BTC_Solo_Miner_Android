@@ -397,9 +397,9 @@ static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     vst1q_u32(&h[4], state1);
 }
 
-static inline int hash_nonce_arm(const SHA256_CTX *base,
-                                 uint32_t tail0, uint32_t tail1, uint32_t tail2,
-                                 const uint8_t target[32], uint32_t nonce) {
+static inline void hash_nonce_arm_digest(const SHA256_CTX *base,
+                                        uint32_t tail0, uint32_t tail1, uint32_t tail2,
+                                        uint32_t nonce, uint8_t digest[32]) {
     uint32_t w[16];
 
     w[0] = tail0;
@@ -432,7 +432,20 @@ static inline int hash_nonce_arm(const SHA256_CTX *base,
     };
     arm_sha256_compress(digest_state, second);
 
-    return le_target_words(digest_state, target);
+    for (int i = 0; i < 8; ++i) {
+        digest[i*4]     = (uint8_t)(digest_state[i] >> 24);
+        digest[i*4 + 1] = (uint8_t)(digest_state[i] >> 16);
+        digest[i*4 + 2] = (uint8_t)(digest_state[i] >> 8);
+        digest[i*4 + 3] = (uint8_t)digest_state[i];
+    }
+}
+
+static inline int hash_nonce_arm(const SHA256_CTX *base,
+                                 uint32_t tail0, uint32_t tail1, uint32_t tail2,
+                                 const uint8_t target[32], uint32_t nonce) {
+    uint8_t digest[32];
+    hash_nonce_arm_digest(base, tail0, tail1, tail2, nonce, digest);
+    return le_target(digest, target);
 }
 #endif
 
@@ -1001,7 +1014,7 @@ int b_m_engine_selftest(void) {
 
 /* Built-in correctness self-test.
  * Return codes identify the failing optimized path:
- * 1 = SHA256d/fast path, 2 = SSE2 path, 3 = AVX2 path. */
+ * 1 = SHA256d/fast path, 2 = SSE2 path, 3 = AVX2 path, 4 = ARM SHA2 path. */
 int b_m_selftest(void) {
     uint8_t prefix[76], target[32], header[80], d1[32], expected[32];
     const uint32_t nonce = 0x12345678U;
@@ -1037,6 +1050,15 @@ int b_m_selftest(void) {
     uint32_t t2=((uint32_t)prefix[72]<<24)|((uint32_t)prefix[73]<<16)|((uint32_t)prefix[74]<<8)|prefix[75];
 
     if (!hash_nonce_fast(&base, t0, t1, t2, target, nonce)) return 1;
+
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+    {
+        uint8_t arm_digest[32];
+        hash_nonce_arm_digest(&base, t0, t1, t2, nonce, arm_digest);
+        if (memcmp(arm_digest, expected_digest, 32) != 0) return 4;
+        if (!hash_nonce_arm(&base, t0, t1, t2, target, nonce)) return 4;
+    }
+#endif
 
 #if defined(__AVX2__)
     {
