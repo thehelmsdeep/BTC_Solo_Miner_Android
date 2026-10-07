@@ -220,6 +220,17 @@ def native_engine_stop_job(engine):
         lib.b_m_engine_stop_job(engine)
 
 
+def verify_header_pow(header_prefix, nonce, target):
+    """Independently verify the exact 80-byte header before submission."""
+    if len(header_prefix) != 76:
+        raise ValueError("Invalid header prefix length")
+    if not 0 <= nonce <= 0xFFFFFFFF:
+        raise ValueError("Invalid nonce")
+    header = header_prefix + nonce.to_bytes(4, "little")
+    digest = double_sha256(header)
+    return int.from_bytes(digest, "little") <= target
+
+
 def native_engine_destroy(engine=None):
     global _native_engine
     engine = engine or _native_engine
@@ -688,7 +699,12 @@ def miner_loop():
                     if not native_engine_set_job(engine, header_prefix, target):
                         raise RuntimeError("Failed to update native mining job")
 
-                    current_job = job
+                    # Freeze the exact job/extranonce/header used by native hashing.
+                    # A later mining.notify must never mix metadata into a found nonce.
+                    current_job = dict(job)
+                    current_job["extranonce2"] = extranonce2
+                    current_job["header_prefix"] = header_prefix
+                    current_job["target"] = target
                     current_generation = job["generation"]
 
                     print(
@@ -749,8 +765,24 @@ def miner_loop():
                     print(Style.RESET_ALL)
                     logg("[!!!] VALID BLOCK HEADER FOUND: job=%s nonce=%08x nbits=%s" %
                          (current_job["job_id"], found, current_job["nbits"]))
+                    # Re-hash the exact header used by native before any network submit.
+                    found_snapshot = dict(current_job)
                     try:
-                        submit_share(current_job["job_id"], extranonce2, current_job["ntime"], found)
+                        if not verify_header_pow(
+                            found_snapshot["header_prefix"],
+                            found,
+                            found_snapshot["target"],
+                        ):
+                            print(Fore.RED, "[!] Native hit failed independent SHA256d verification; NOT submitting")
+                            logg("[!] Native hit rejected by independent verification: job=%s nonce=%08x" %
+                                 (found_snapshot["job_id"], found))
+                        else:
+                            submit_share(
+                                found_snapshot["job_id"],
+                                found_snapshot["extranonce2"],
+                                found_snapshot["ntime"],
+                                found,
+                            )
                     except Exception as exc:
                         print(Fore.RED, "[!] Share submit failed:", exc)
 
@@ -840,8 +872,16 @@ def miner_loop():
                         logg("[!!!] VALID BLOCK HEADER FOUND: job=%s nonce=%08x nbits=%s" %
                              (found_job, nonce, job["nbits"]))
 
+                        # Independently verify the exact worker header before submit.
                         try:
-                            submit_share(found_job, extranonce2, found_ntime, nonce)
+                            found_prefix = build_header_prefix(job, extranonce2)
+                            found_target = compact_to_target(job["nbits"])
+                            if not verify_header_pow(found_prefix, nonce, found_target):
+                                print(Fore.RED, "[!] Python-engine hit failed independent SHA256d verification; NOT submitting")
+                                logg("[!] Python hit rejected by independent verification: job=%s nonce=%08x" %
+                                     (found_job, nonce))
+                            else:
+                                submit_share(found_job, extranonce2, found_ntime, nonce)
                         except Exception as exc:
                             print(Fore.RED, "[!] Share submit failed:", exc)
                         break
