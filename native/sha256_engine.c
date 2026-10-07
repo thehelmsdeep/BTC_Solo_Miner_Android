@@ -436,6 +436,233 @@ static inline int hash_nonce_arm(const SHA256_CTX *base,
 }
 #endif
 
+
+static inline void arm_sha256_compress4(const uint32_t base_h[8],
+                                        const uint32_t w0_fixed,
+                                        const uint32_t w1_fixed,
+                                        const uint32_t w2_fixed,
+                                        const uint32_t nonces[4],
+                                        uint32_t out_h[8][4]) {
+    uint32x4_t state0[2];
+    uint32x4_t state1[2];
+
+    state0[0] = vdupq_n_u32(base_h[0]);
+    state0[1] = vdupq_n_u32(base_h[1]);
+    state1[0] = vdupq_n_u32(base_h[2]);
+    state1[1] = vdupq_n_u32(base_h[3]);
+
+    uint32x4_t a = vdupq_n_u32(base_h[0]);
+    uint32x4_t b = vdupq_n_u32(base_h[1]);
+    uint32x4_t cc = vdupq_n_u32(base_h[2]);
+    uint32x4_t d = vdupq_n_u32(base_h[3]);
+    uint32x4_t e = vdupq_n_u32(base_h[4]);
+    uint32x4_t f = vdupq_n_u32(base_h[5]);
+    uint32x4_t g = vdupq_n_u32(base_h[6]);
+    uint32x4_t hh = vdupq_n_u32(base_h[7]);
+    (void)state0;
+    (void)state1;
+    (void)a; (void)b; (void)cc; (void)d; (void)e; (void)f; (void)g; (void)hh;
+
+    uint32x4_t s0 = vdupq_n_u32(base_h[0]);
+    uint32x4_t s1 = vdupq_n_u32(base_h[1]);
+    uint32x4_t s2 = vdupq_n_u32(base_h[2]);
+    uint32x4_t s3 = vdupq_n_u32(base_h[3]);
+    uint32x4_t s4 = vdupq_n_u32(base_h[4]);
+    uint32x4_t s5 = vdupq_n_u32(base_h[5]);
+    uint32x4_t s6 = vdupq_n_u32(base_h[6]);
+    uint32x4_t s7 = vdupq_n_u32(base_h[7]);
+
+    uint32x4_t m0 = vdupq_n_u32(w0_fixed);
+    uint32x4_t m1 = vdupq_n_u32(w1_fixed);
+    uint32x4_t m2 = vdupq_n_u32(w2_fixed);
+    uint32x4_t m3 = { BSWAP32(nonces[0]), BSWAP32(nonces[1]),
+                      BSWAP32(nonces[2]), BSWAP32(nonces[3]) };
+
+#define ARM4_ROUND(MSG, KOFF) do { \
+    uint32x4_t _old = s0; \
+    uint32x4_t _wk = vaddq_u32((MSG), vdupq_n_u32(K[(KOFF)])); \
+    s0 = vsha256hq_u32(s0, s1, _wk); \
+    s1 = vsha256h2q_u32(s1, _old, _wk); \
+} while (0)
+
+    ARM4_ROUND(m0, 0);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+
+    ARM4_ROUND(m1, 4);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+
+    ARM4_ROUND(m2, 8);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+
+    ARM4_ROUND(m3, 12);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+
+    ARM4_ROUND(m0, 16);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+
+    ARM4_ROUND(m1, 20);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+
+    ARM4_ROUND(m2, 24);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+
+    ARM4_ROUND(m3, 28);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+
+    ARM4_ROUND(m0, 32);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+
+    ARM4_ROUND(m1, 36);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+
+    ARM4_ROUND(m2, 40);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+
+    ARM4_ROUND(m3, 44);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+
+    ARM4_ROUND(m0, 48);
+    ARM4_ROUND(m1, 52);
+    ARM4_ROUND(m2, 56);
+    ARM4_ROUND(m3, 60);
+
+#undef ARM4_ROUND
+
+    s0 = vaddq_u32(s0, vdupq_n_u32(base_h[0]));
+    s1 = vaddq_u32(s1, vdupq_n_u32(base_h[1]));
+    s2 = vaddq_u32(s2, vdupq_n_u32(base_h[2]));
+    s3 = vaddq_u32(s3, vdupq_n_u32(base_h[3]));
+    s4 = vaddq_u32(s4, vdupq_n_u32(base_h[4]));
+    s5 = vaddq_u32(s5, vdupq_n_u32(base_h[5]));
+    s6 = vaddq_u32(s6, vdupq_n_u32(base_h[6]));
+    s7 = vaddq_u32(s7, vdupq_n_u32(base_h[7]));
+
+    vst1q_u32(out_h[0], s0);
+    vst1q_u32(out_h[1], s1);
+    vst1q_u32(out_h[2], s2);
+    vst1q_u32(out_h[3], s3);
+    vst1q_u32(out_h[4], s4);
+    vst1q_u32(out_h[5], s5);
+    vst1q_u32(out_h[6], s6);
+    vst1q_u32(out_h[7], s7);
+}
+
+static inline int arm_sha256_4_hashes(const SHA256_CTX *base,
+                                      uint32_t tail0, uint32_t tail1, uint32_t tail2,
+                                      const uint32_t nonces[4],
+                                      const uint32_t target_words[8],
+                                      uint8_t hit_mask[4]) {
+    uint32_t first[8][4];
+    arm_sha256_compress4(base->h, tail0, tail1, tail2, nonces, first);
+
+    uint32_t digest[8][4];
+    uint32x4_t s0 = vdupq_n_u32(0x6a09e667U);
+    uint32x4_t s1 = vdupq_n_u32(0xbb67ae85U);
+    uint32x4_t s2 = vdupq_n_u32(0x3c6ef372U);
+    uint32x4_t s3 = vdupq_n_u32(0xa54ff53AU);
+    uint32x4_t s4 = vdupq_n_u32(0x510e527fU);
+    uint32x4_t s5 = vdupq_n_u32(0x9b05688cU);
+    uint32x4_t s6 = vdupq_n_u32(0x1f83d9abU);
+    uint32x4_t s7 = vdupq_n_u32(0x5be0cd19U);
+
+    uint32x4_t m0 = vld1q_u32(first[0]);
+    uint32x4_t m1 = vld1q_u32(first[1]);
+    uint32x4_t m2 = vld1q_u32(first[2]);
+    uint32x4_t m3 = vld1q_u32(first[3]);
+
+#define ARM4_2ROUND(MSG, KOFF) do { \
+    uint32x4_t _old = s0; \
+    uint32x4_t _wk = vaddq_u32((MSG), vdupq_n_u32(K[(KOFF)])); \
+    s0 = vsha256hq_u32(s0, s1, _wk); \
+    s1 = vsha256h2q_u32(s1, _old, _wk); \
+} while (0)
+
+    ARM4_2ROUND(m0, 0);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+    ARM4_2ROUND(m1, 4);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+    ARM4_2ROUND(m2, 8);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+    ARM4_2ROUND(m3, 12);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+    ARM4_2ROUND(m0, 16);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+    ARM4_2ROUND(m1, 20);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+    ARM4_2ROUND(m2, 24);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+    ARM4_2ROUND(m3, 28);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+    ARM4_2ROUND(m0, 32);
+    m0 = vsha256su0q_u32(m0, m1);
+    m0 = vsha256su1q_u32(m0, m2, m3);
+    ARM4_2ROUND(m1, 36);
+    m1 = vsha256su0q_u32(m1, m2);
+    m1 = vsha256su1q_u32(m1, m3, m0);
+    ARM4_2ROUND(m2, 40);
+    m2 = vsha256su0q_u32(m2, m3);
+    m2 = vsha256su1q_u32(m2, m0, m1);
+    ARM4_2ROUND(m3, 44);
+    m3 = vsha256su0q_u32(m3, m0);
+    m3 = vsha256su1q_u32(m3, m1, m2);
+    ARM4_2ROUND(m0, 48);
+    ARM4_2ROUND(m1, 52);
+    ARM4_2ROUND(m2, 56);
+    ARM4_2ROUND(m3, 60);
+
+#undef ARM4_2ROUND
+
+    s0 = vaddq_u32(s0, vdupq_n_u32(0x6a09e667U));
+    s1 = vaddq_u32(s1, vdupq_n_u32(0xbb67ae85U));
+    s2 = vaddq_u32(s2, vdupq_n_u32(0x3c6ef372U));
+    s3 = vaddq_u32(s3, vdupq_n_u32(0xa54ff53AU));
+    s4 = vaddq_u32(s4, vdupq_n_u32(0x510e527fU));
+    s5 = vaddq_u32(s5, vdupq_n_u32(0x9b056c08U));
+    s6 = vaddq_u32(s6, vdupq_n_u32(0x1f83d9abU));
+    s7 = vaddq_u32(s7, vdupq_n_u32(0x5be0cd19U));
+
+    vst1q_u32(digest[0], s0);
+    vst1q_u32(digest[1], s1);
+    vst1q_u32(digest[2], s2);
+    vst1q_u32(digest[3], s3);
+    vst1q_u32(digest[4], s4);
+    vst1q_u32(digest[5], s5);
+    vst1q_u32(digest[6], s6);
+    vst1q_u32(digest[7], s7);
+
+    for (int lane = 0; lane < 4; ++lane) {
+        int ok = 1;
+        for (int i = 7; i >= 0; --i) {
+            uint32_t hv = BSWAP32(digest[i][lane]);
+            uint32_t tv = target_words[i];
+            if (hv < tv) break;
+            if (hv > tv) { ok = 0; break; }
+        }
+        hit_mask[lane] = (uint8_t)ok;
+    }
+    return 1;
+}
+
 static int hash_nonce(const uint8_t prefix[76],const SHA256_CTX *base,
                       const uint8_t target[32],uint32_t nonce){
  uint32_t t0,t1,t2; const uint8_t *p=prefix+64;
@@ -686,6 +913,39 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         const uint32_t tail1 = ((uint32_t)tail[4]<<24)|((uint32_t)tail[5]<<16)|((uint32_t)tail[6]<<8)|tail[7];
         const uint32_t tail2 = ((uint32_t)tail[8]<<24)|((uint32_t)tail[9]<<16)|((uint32_t)tail[10]<<8)|tail[11];
 
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+        for (; n + 4 <= end; n += 4) {
+            uint32_t nonces[4] = {
+                (uint32_t)n, (uint32_t)n + 1U,
+                (uint32_t)n + 2U, (uint32_t)n + 3U
+            };
+            uint8_t hits[4];
+            arm_sha256_4_hashes(&base, tail0, tail1, tail2,
+                                nonces, target_words, hits);
+            local += 4;
+            for (int lane = 0; lane < 4; ++lane) if (hits[lane]) {
+                engine_lock(e);
+                if (!e->found_valid && !e->stop_job && !e->shutdown) {
+                    e->found_valid = 1;
+                    e->found_nonce = nonces[lane];
+                    e->stop_job = 1;
+                }
+                engine_unlock(e);
+                __atomic_fetch_add(&e->total_hashes, local, __ATOMIC_RELAXED);
+                return;
+            }
+            if ((local & 0x3FFFF) == 0) {
+                int stop = __atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+                           __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+                           !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                           __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
+                if (stop) {
+                    if (local) __atomic_fetch_add(&e->total_hashes, local, __ATOMIC_RELAXED);
+                    return;
+                }
+            }
+        }
+#endif
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86_FP)
 #if defined(__AVX2__)
         for (; n + 8 <= end; n += 8) {
@@ -741,7 +1001,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #endif
         for (; n < end; ++n) {
-            if (hash_nonce_fast(&base,tail0,tail1,tail2,target,(uint32_t)n)) {
+            if (hash_nonce(&prefix, &base, target, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !e->stop_job && !e->shutdown) {
                     e->found_valid=1;
