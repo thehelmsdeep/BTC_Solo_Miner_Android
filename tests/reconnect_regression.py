@@ -16,6 +16,21 @@ import main
 import miner_context as ctx
 
 
+class FakeSocket:
+    """Minimal socket used by the reconnect regression.
+
+    The listener must see a normal connection-close condition rather than an
+    AttributeError from an object that lacks recv(). This exercises the same
+    ConnectionError path used by a real upstream disconnect.
+    """
+
+    def recv(self, _size):
+        return b""
+
+    def close(self):
+        return None
+
+
 def main_test():
     original_connect = main.connect_upstream
     original_miner = main.miner_loop
@@ -29,7 +44,7 @@ def main_test():
             raise ConnectionError("intentional test disconnect")
         ctx.connected = True
         ctx.upstream_alive = True
-        return object()
+        return FakeSocket()
 
     def fake_miner():
         attempts["mine"] += 1
