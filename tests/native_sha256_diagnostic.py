@@ -51,6 +51,13 @@ def check_one(lib, prefix, nonce):
     header = prefix + nonce.to_bytes(4, "little")
     python_digest = hashlib.sha256(hashlib.sha256(header).digest()).digest()
 
+    # Stable cross-architecture regression vector.
+    if prefix == bytes(range(76)) and nonce == 0x12345678:
+        golden = "b95e5a66205cb3427c2ab6400bf8bb52bc9f0c8611093385313f7c2d1ad8d079"
+        report("golden SHA256d vector", python_digest.hex() == golden,
+               "MATCH" if python_digest.hex() == golden else
+               "MISMATCH got=" + python_digest.hex())
+
     scalar_buf = (ctypes.c_uint8 * 32)()
     scalar_base_buf = (ctypes.c_uint8 * 32)()
     optimized_buf = (ctypes.c_uint8 * 32)()
@@ -165,7 +172,29 @@ def check_engine(lib, prefix, nonce):
         lib.b_m_engine_destroy(engine)
 
 
+def check_compact_target():
+    """Verify the Python nBits decoder against canonical Bitcoin values."""
+    ok = True
+    expected = 0x00000000FFFF0000000000000000000000000000000000000000000000000000
+    try:
+        got = main.compact_to_target("1d00ffff")
+        ok &= report("compact nBits 1d00ffff", got == expected,
+                     "target=0x%064x" % got)
+    except Exception as exc:
+        ok &= report("compact nBits 1d00ffff", False, str(exc))
+
+    for bad in ("00000000", "01003456", "1d80ffff", "zzzzzzzz", "1"):
+        try:
+            main.compact_to_target(bad)
+            ok &= report("compact invalid %s" % bad, False,
+                         "accepted invalid nBits")
+        except ValueError:
+            ok &= report("compact invalid %s" % bad, True, "rejected")
+    return ok
+
+
 def main_test():
+    all_ok = check_compact_target()
     lib = main.ensure_native()
     if lib is None:
         print("SKIP: native library could not be built/loaded")
@@ -175,7 +204,6 @@ def main_test():
     prefix = bytes(range(76))
     nonces = (0, 1, 0x12345678, 0x80000000, 0xFFFFFFFF)
 
-    all_ok = True
     for nonce in nonces:
         all_ok &= check_one(lib, prefix, nonce)
 
