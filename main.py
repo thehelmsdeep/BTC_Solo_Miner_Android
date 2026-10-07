@@ -546,69 +546,84 @@ def upstream_listener(sock):
                     method = msg.get("method")
 
                     if method == "mining.notify":
-                    try:
-                        update_job(msg.get("params", []))
-                    except (TypeError, ValueError, KeyError) as exc:
-                        logg("[!] Invalid mining.notify ignored: %s" % exc)
-                        print(Fore.RED, "[!] Invalid mining job ignored:", exc)
-                        continue
-                    print(Fore.YELLOW, "[*] New mining job:", ctx.job_id)
+                        try:
+                            update_job(msg.get("params", []))
+                        except (TypeError, ValueError, KeyError) as exc:
+                            logg("[!] Invalid mining.notify ignored: %s" % exc)
+                            print(Fore.RED, "[!] Invalid mining job ignored:", exc)
+                            continue
+                        print(Fore.YELLOW, "[*] New mining job:", ctx.job_id)
 
-                elif method == "mining.set_difficulty":
-                    params = msg.get("params", [])
-                    if params:
-                        ctx.upstream_difficulty = params[0]
-                    print(Fore.CYAN, "[*] Pool difficulty:",
-                          ctx.upstream_difficulty)
+                    elif method == "mining.set_difficulty":
+                        params = msg.get("params", [])
+                        if params:
+                            ctx.upstream_difficulty = params[0]
+                        print(Fore.CYAN, "[*] Pool difficulty:",
+                              ctx.upstream_difficulty)
 
-                elif method == "mining.set_extranonce":
-                    params = msg.get("params", [])
-                    try:
-                        if len(params) < 2:
-                            raise ValueError("missing extranonce parameters")
-                        _validate_hex_blob(params[0], "extranonce1")
-                        size = int(params[1])
-                        if not 1 <= size <= 32:
-                            raise ValueError("invalid extranonce2_size")
-                    except (TypeError, ValueError) as exc:
-                        logg("[!] Invalid mining.set_extranonce ignored: %s" % exc)
-                        print(Fore.RED, "[!] Invalid extranonce update ignored:", exc)
-                        continue
-                    with ctx.job_lock:
-                        ctx.upstream_extranonce1 = params[0]
-                        ctx.upstream_extranonce2_size = size
-                        ctx.job_generation += 1
-                    print(Fore.CYAN, "[*] Pool extranonce updated")
+                    elif method == "mining.set_extranonce":
+                        params = msg.get("params", [])
+                        try:
+                            if len(params) < 2:
+                                raise ValueError("missing extranonce parameters")
+                            _validate_hex_blob(params[0], "extranonce1")
+                            size = int(params[1])
+                            if not 1 <= size <= 32:
+                                raise ValueError("invalid extranonce2_size")
+                        except (TypeError, ValueError) as exc:
+                            logg("[!] Invalid mining.set_extranonce ignored: %s" % exc)
+                            print(Fore.RED, "[!] Invalid extranonce update ignored:", exc)
+                            continue
+                        with ctx.job_lock:
+                            ctx.upstream_extranonce1 = params[0]
+                            ctx.upstream_extranonce2_size = size
+                            ctx.job_generation += 1
+                        print(Fore.CYAN, "[*] Pool extranonce updated")
 
                     elif "id" in msg:
                         msg_id = msg.get("id")
-                    with ctx.pending_submits_lock:
-                        submitted_at = ctx.pending_submits.pop(msg_id, None)
+                        with ctx.pending_submits_lock:
+                            submitted_at = ctx.pending_submits.pop(msg_id, None)
 
-                    if submitted_at is not None:
-                        accepted = (
-                            msg.get("result") is True
-                            and msg.get("error") is None
-                        )
-                        if accepted:
-                            ctx.shares_accepted += 1
-                            metrics.share_result(True)
-                        else:
-                            ctx.shares_rejected += 1
-                            metrics.share_result(False)
+                        if submitted_at is not None:
+                            accepted = (
+                                msg.get("result") is True
+                                and msg.get("error") is None
+                            )
+                            if accepted:
+                                ctx.shares_accepted += 1
+                                metrics.share_result(True)
+                            else:
+                                ctx.shares_rejected += 1
+                                metrics.share_result(False)
 
-                        elapsed = time.monotonic() - submitted_at
-                        if accepted:
-                            print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                                  "[+] SHARE ACCEPTED | id=%s | latency=%.3fs" % (msg_id, elapsed), Style.RESET_ALL)
+                            elapsed = time.monotonic() - submitted_at
+                            if accepted:
+                                print(
+                                    Style.BRIGHT + Fore.WHITE + Back.GREEN,
+                                    "[+] SHARE ACCEPTED | id=%s | latency=%.3fs"
+                                    % (msg_id, elapsed),
+                                    Style.RESET_ALL,
+                                )
+                            else:
+                                print(
+                                    Style.BRIGHT + Fore.WHITE + Back.RED,
+                                    "[-] SHARE REJECTED | id=%s | latency=%.3fs | error=%s"
+                                    % (msg_id, elapsed, msg.get("error") or ""),
+                                    Style.RESET_ALL,
+                                )
+                            logg(
+                                "[*] Share %s: id=%s latency=%.3fs error=%s"
+                                % (
+                                    "ACCEPTED" if accepted else "REJECTED",
+                                    msg_id,
+                                    elapsed,
+                                    msg.get("error") or "",
+                                )
+                            )
                         else:
-                            print(Style.BRIGHT + Fore.WHITE + Back.RED,
-                                  "[-] SHARE REJECTED | id=%s | latency=%.3fs | error=%s" % (msg_id, elapsed, msg.get("error") or ""), Style.RESET_ALL)
-                        logg("[*] Share %s: id=%s latency=%.3fs error=%s" %
-                             ("ACCEPTED" if accepted else "REJECTED",
-                              msg_id, elapsed, msg.get("error") or ""))
-                    else:
-                        logg("[*] Upstream response: %s" % msg)
+                            logg("[*] Upstream response: %s" % msg)
+
                 except Exception as exc:
                     logg("[!] Upstream message handler error: %s" % exc)
                     print(Fore.RED, "[!] Upstream message ignored:", exc)
@@ -622,7 +637,6 @@ def upstream_listener(sock):
     finally:
         ctx.upstream_alive = False
         expire_pending_submits(force=True)
-
 
 def expire_pending_submits(force=False):
     now = time.monotonic()
