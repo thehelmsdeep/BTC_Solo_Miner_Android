@@ -921,6 +921,14 @@ def miner_loop():
                         logg("[!!!] VALID BLOCK HEADER FOUND: job=%s nonce=%08x nbits=%s" %
                              (found_job, nonce, job["nbits"]))
 
+                        # A notify can race with result_queue delivery. Never
+                        # submit a hit from an obsolete job generation.
+                        latest = globals()["current_job"]()
+                        if latest is None or latest["generation"] != job["generation"]:
+                            logg("[!] Discarding stale Python hit: job=%s nonce=%08x" %
+                                 (found_job, nonce))
+                            break
+
                         # Independently verify the exact worker header before submit.
                         try:
                             found_prefix = build_header_prefix(job, extranonce2)
