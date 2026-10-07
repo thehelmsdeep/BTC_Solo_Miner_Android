@@ -104,8 +104,6 @@ def main():
     test_state_machine()
     test_metrics()
     test_structured_logging()
-    test_state_machine()
-    test_metrics()
     print("ENGINEERING FORTRESS: PASS")
     return 0
 
