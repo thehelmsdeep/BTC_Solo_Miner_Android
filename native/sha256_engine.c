@@ -37,24 +37,22 @@ static inline uint32_t BSWAP32(uint32_t x){
 
 /* SHA-256 compression for already-decoded big-endian message words. */
 static inline void transform_words(SHA256_CTX * restrict c,const uint32_t in[16]){
- uint32_t w[16],a,b,cc,d,e,f,g,h; int i;
- memcpy(w,in,64);
- a=c->h[0]; b=c->h[1]; cc=c->h[2]; d=c->h[3];
- e=c->h[4]; f=c->h[5]; g=c->h[6]; h=c->h[7];
- for(i=0;i<64;i++){
-  uint32_t wi;
-  if(i>=16){
-   uint32_t x=w[(i-15)&15], y=w[(i-2)&15];
-   uint32_t s0=R(x,7)^R(x,18)^(x>>3);
-   uint32_t s1=R(y,17)^R(y,19)^(y>>10);
-   wi=w[i&15]+s0+w[(i-7)&15]+s1;
-   w[i&15]=wi;
-  } else wi=w[i];
+ uint32_t w[64];
+ for(int i=0;i<16;i++) w[i]=in[i];
+ for(int i=16;i<64;i++){
+  uint32_t x=w[i-15], y=w[i-2];
+  uint32_t s0=R(x,7)^R(x,18)^(x>>3);
+  uint32_t s1=R(y,17)^R(y,19)^(y>>10);
+  w[i]=w[i-16]+s0+w[i-7]+s1;
+ }
+ uint32_t a=c->h[0], b=c->h[1], cc=c->h[2], d=c->h[3];
+ uint32_t e=c->h[4], f=c->h[5], g=c->h[6], h=c->h[7];
+ for(int i=0;i<64;i++){
   uint32_t S1=R(e,6)^R(e,11)^R(e,25);
   uint32_t ch=(e&f)^((~e)&g);
-  uint32_t t1=h+S1+ch+K[i]+wi;
+  uint32_t t1=h+S1+ch+K[i]+w[i];
   uint32_t S0=R(a,2)^R(a,13)^R(a,22);
-  uint32_t maj=(a&b)^(a&cc);
+  uint32_t maj=(a&b)^(a&cc)^(b&cc);
   uint32_t t2=S0+maj;
   h=g; g=f; f=e; e=d+t1;
   d=cc; cc=b; b=a; a=t1+t2;
