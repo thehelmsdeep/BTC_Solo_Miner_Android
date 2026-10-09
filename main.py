@@ -58,7 +58,7 @@ def logg(msg):
 def render_dashboard(rate, interval_hashes=None):
     """Render a compact live status screen without deleting saved log files."""
     # ANSI clear/home works in Termux and modern Windows terminals.
-    print("\\033[2J\\033[H", end="")
+    print("\033[2J\033[H", end="")
     print(Fore.BLUE + "============== b_m CPU Solo Miner ==============" + Style.RESET_ALL)
     print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
     print("Hashrate     : %.2f H/s" % rate)
