@@ -61,7 +61,7 @@ def render_dashboard(rate, interval_hashes=None):
     print("\033[2J\033[H", end="")
     print(Fore.BLUE + "============== CPU Solo Miner ==============" + Style.RESET_ALL)
     print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
-    print("Hashrate     : %.2f H/s" % rate)
+    print("Hashrate     : %.6f MH/s" % (rate / 1_000_000))
     if interval_hashes is not None:
         print("Interval Hash: %d" % interval_hashes)
     print("Total Hashes : %d" % ctx.total_hashes)
