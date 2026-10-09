@@ -55,6 +55,22 @@ def logg(msg):
     structured_logger.event("log", message=str(msg))
 
 
+def render_dashboard(rate, interval_hashes=None):
+    """Render a compact live status screen without deleting saved log files."""
+    # ANSI clear/home works in Termux and modern Windows terminals.
+    print("\\033[2J\\033[H", end="")
+    print(Fore.BLUE + "============== b_m CPU Solo Miner ==============" + Style.RESET_ALL)
+    print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
+    print("Hashrate     : %.2f H/s" % rate)
+    if interval_hashes is not None:
+        print("Interval Hash: %d" % interval_hashes)
+    print("Total Hashes : %d" % ctx.total_hashes)
+    print("Submitted    : %d" % ctx.shares_submitted)
+    print("Accepted     : %d" % ctx.shares_accepted)
+    print("Rejected     : %d" % ctx.shares_rejected)
+    print("================================================")
+
+
 def handler(signal_received, frame):
     ctx.fShutdown = True
     print(Fore.MAGENTA, "[", timer(), "]", Fore.YELLOW,
@@ -967,11 +983,7 @@ def miner_loop():
                 now = time.monotonic()
                 if now - last_report >= REPORT_INTERVAL:
                     rate = hashes_since_report / max(now - last_report, 0.001)
-                    print(
-                        Fore.CYAN,
-                        "[*] Hashrate: %.2f H/s | interval_hashes=%d | total_hashes=%d | submitted=%d accepted=%d rejected=%d"
-                        % (rate, hashes_since_report, ctx.total_hashes, ctx.shares_submitted, ctx.shares_accepted, ctx.shares_rejected),
-                    )
+                    render_dashboard(rate, hashes_since_report)
                     hashes_since_report = 0
                     last_report = now
 
@@ -1075,11 +1087,7 @@ def miner_loop():
             now = time.monotonic()
             if now - last_report >= REPORT_INTERVAL:
                 rate = hashes_since_report / max(now - last_report, 0.001)
-                print(
-                    Fore.CYAN,
-                    "[*] Hashrate: %.2f H/s | submitted=%d accepted=%d rejected=%d"
-                    % (rate, ctx.shares_submitted, ctx.shares_accepted, ctx.shares_rejected),
-                )
+                render_dashboard(rate, hashes_since_report)
                 hashes_since_report = 0
                 last_report = now
 
