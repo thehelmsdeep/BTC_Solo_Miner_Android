@@ -194,6 +194,8 @@ def ensure_native():
 
         lib.b_m_engine_exhausted.argtypes = [ctypes.c_void_p]
         lib.b_m_engine_exhausted.restype = ctypes.c_int
+        lib.b_m_engine_next_nonce.argtypes = [ctypes.c_void_p]
+        lib.b_m_engine_next_nonce.restype = ctypes.c_uint64
 
         lib.b_m_engine_create.argtypes = [ctypes.c_uint32]
         lib.b_m_engine_create.restype = ctypes.c_void_p
@@ -285,6 +287,12 @@ def native_engine_poll(engine):
 def native_engine_exhausted(engine):
     lib = ensure_native()
     return bool(lib and engine and lib.b_m_engine_exhausted(engine))
+
+
+def native_engine_next_nonce(engine):
+    """Return the upper boundary of nonce chunks allocated to native workers."""
+    lib = ensure_native()
+    return int(lib.b_m_engine_next_nonce(engine)) if lib is not None and engine else 0
 
 
 def native_engine_stop_job(engine):
@@ -1065,8 +1073,10 @@ def miner_loop():
                         hashrate_hs=round(rate, 3),
                         hashrate_mhs=round(rate / 1_000_000, 6),
                         pool_difficulty=ctx.upstream_difficulty,
+                        nonce_allocated_until="%08x" % min(native_engine_next_nonce(engine), 0xFFFFFFFF),
+                        nonce_space=2**32,
                         memory=memory_snapshot(),
-                        workers=worker_count_snapshot(),
+                        workers=worker_count_snapshot(CPU_THREADS),
                         elapsed_uptime=metrics.snapshot()["uptime_s"],
                     )
                     render_dashboard(rate, hashes_since_report)
@@ -1213,7 +1223,7 @@ def miner_loop():
                     hashrate_mhs=round(rate / 1_000_000, 6),
                     pool_difficulty=ctx.upstream_difficulty,
                     memory=memory_snapshot(),
-                    workers=worker_count_snapshot(),
+                    workers=worker_count_snapshot(CPU_THREADS),
                     elapsed_uptime=metrics.snapshot()["uptime_s"],
                 )
                 render_dashboard(rate, hashes_since_report)
