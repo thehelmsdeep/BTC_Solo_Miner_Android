@@ -1043,7 +1043,13 @@ def miner_loop():
                             print(Fore.RED, "[!] Native hit failed independent SHA256d verification; NOT submitting")
                             logg("[!] Native hit rejected by independent verification: job=%s nonce=%08x" %
                                  (found_snapshot["job_id"], found))
+                            debug_log("Target verification failed", engine="native",
+                                      job_id=found_snapshot["job_id"], nonce="%08x" % found,
+                                      target_hex="%064x" % found_snapshot["target"])
                         else:
+                            debug_log("Target verification passed", engine="native",
+                                      job_id=found_snapshot["job_id"], nonce="%08x" % found,
+                                      target_hex="%064x" % found_snapshot["target"])
                             submit_share(
                                 found_snapshot["job_id"],
                                 found_snapshot["extranonce2"],
@@ -1197,7 +1203,13 @@ def miner_loop():
                                 print(Fore.RED, "[!] Python-engine hit failed independent SHA256d verification; NOT submitting")
                                 logg("[!] Python hit rejected by independent verification: job=%s nonce=%08x" %
                                      (found_job, nonce))
+                                debug_log("Target verification failed", engine="python",
+                                          job_id=found_job, nonce="%08x" % nonce,
+                                          target_hex="%064x" % found_target)
                             else:
+                                debug_log("Target verification passed", engine="python",
+                                          job_id=found_job, nonce="%08x" % nonce,
+                                          target_hex="%064x" % found_target)
                                 submit_share(found_job, extranonce2, found_ntime, nonce)
                         except Exception as exc:
                             print(Fore.RED, "[!] Share submit failed:", exc)
@@ -1313,6 +1325,8 @@ def run():
             except Exception:
                 pass
             ctx.upstream_sock = None
+            debug_log("Connection closed", host=UPSTREAM_HOST, port=UPSTREAM_PORT,
+                      shutdown=ctx.fShutdown)
 
         if not ctx.fShutdown:
             if state_machine.state != MinerState.RECONNECTING:
@@ -1321,6 +1335,8 @@ def run():
                 except ValueError:
                     state_machine.reset()
             print(Fore.YELLOW, "[*] Reconnecting in %.1f seconds..." % RECONNECT_DELAY)
+            debug_log("Reconnect scheduled", delay_seconds=RECONNECT_DELAY,
+                      host=UPSTREAM_HOST, port=UPSTREAM_PORT)
             time.sleep(RECONNECT_DELAY)
             if state_machine.state == MinerState.RECONNECTING:
                 state_machine.transition(MinerState.CONNECTING)
