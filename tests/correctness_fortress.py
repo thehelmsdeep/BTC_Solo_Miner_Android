@@ -165,17 +165,30 @@ def test_header_endian_serialization():
     expected = (
         bytes.fromhex("20000001")[::-1]
         + bytes.fromhex(job["prevhash"])[::-1]
-        + dsha256(coinbase)[::-1]
+        + dsha256(coinbase)
         + bytes.fromhex("65abcdef")[::-1]
         + bytes.fromhex("1d00ffff")[::-1]
     )
     check("76-byte header prefix length", len(prefix) == 76)
     check("header version little-endian", prefix[:4] == bytes.fromhex("01000020"))
     check("header prevhash byte order", prefix[4:36] == bytes.fromhex(job["prevhash"])[::-1])
-    check("header merkle byte order", prefix[36:68] == dsha256(coinbase)[::-1])
+    check("header merkle bytes are raw SHA256d output", prefix[36:68] == dsha256(coinbase))
     check("header nTime little-endian", prefix[68:72] == bytes.fromhex("efcdab65"))
     check("header nBits little-endian", prefix[72:76] == bytes.fromhex("ffff001d"))
     check("complete header serialization", prefix == expected)
+
+    # CKPool Stratum V1 sends merkle branches in the byte order consumed by
+    # the pairwise SHA256d calculation. The resulting raw SHA256d bytes are
+    # already the serialized Merkle-root field in the Bitcoin header.
+    branch = bytes.fromhex("11" * 32)
+    branch_job = dict(job, merkle_branch=[branch.hex()])
+    branch_prefix = main.build_header_prefix(branch_job, "ccdd")
+    expected_coinbase_hash = dsha256(coinbase)
+    expected_root = dsha256(expected_coinbase_hash + branch)
+    check(
+        "Stratum merkle branch/header serialization",
+        branch_prefix[36:68] == expected_root,
+    )
 
 
 def test_nonce_boundaries():
