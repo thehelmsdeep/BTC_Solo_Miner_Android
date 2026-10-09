@@ -1115,8 +1115,9 @@ def miner_loop():
             (job["job_id"], CPU_THREADS),
         )
 
-        while (not ctx.fShutdown and ctx.upstream_alive
-               and not stop_event.is_set()):
+        # A worker sets stop_event before its queued "found" result is handled.
+        # Keep draining the queue so a valid hit is not lost when the stop flag flips.
+        while not ctx.fShutdown and ctx.upstream_alive:
             new_job = globals()["current_job"]()
             if new_job is None:
                 time.sleep(0.2)
@@ -1205,8 +1206,11 @@ def miner_loop():
                         print(Fore.RED, "[!] CPU worker error:", event[2])
                         debug_log("Worker error", worker_id=event[1], job_id=job["job_id"], error=event[2])
 
-            except Exception:
-                pass
+            except Exception as exc:
+                debug_log("Worker result queue read failed", job_id=job["job_id"], error=repr(exc))
+
+            if stop_event.is_set():
+                break
 
             now = time.monotonic()
             if now - last_report >= REPORT_INTERVAL:
