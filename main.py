@@ -65,6 +65,7 @@ def render_dashboard(rate, interval_hashes=None):
     # ANSI clear/home works in Termux and modern Windows terminals.
     print("\033[2J\033[H", end="")
     print(Fore.BLUE + "============== CPU Solo Miner ==============" + Style.RESET_ALL)
+    print("Wallet       : " + ADDRESS)
     print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
     print("Hashrate     : %.6f MH/s" % (rate / 1_000_000))
     if interval_hashes is not None:
