@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import multiprocessing as mp
+import queue
 import os
 import pathlib
 import platform
@@ -1206,6 +1207,8 @@ def miner_loop():
                         print(Fore.RED, "[!] CPU worker error:", event[2])
                         debug_log("Worker error", worker_id=event[1], job_id=job["job_id"], error=event[2])
 
+            except queue.Empty:
+                pass
             except Exception as exc:
                 debug_log("Worker result queue read failed", job_id=job["job_id"], error=repr(exc))
 
