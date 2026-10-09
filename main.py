@@ -21,6 +21,7 @@ from miner_config import CONFIG
 from miner_metrics import MinerMetrics
 from miner_state import MinerState, MinerStateMachine
 from miner_logging import StructuredLogger
+from miner_diagnostics import memory_snapshot, worker_count_snapshot
 
 
 # Backward-compatible aliases. Configuration ownership lives in miner_config.py.
@@ -409,6 +410,10 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
     try:
         header_prefix = build_header_prefix(job, extranonce2)
         target = compact_to_target(job["nbits"])
+        started = time.monotonic()
+        last_report = started
+        reported_hashes = 0
+        result_queue.put(("worker_start", worker_id, job["job_id"], target, len(header_prefix)))
 
         sha256 = hashlib.sha256
         base = sha256(header_prefix[:64])
@@ -430,14 +435,22 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
 
                 if int.from_bytes(digest, "little") <= target:
                     result_queue.put((
-                        "found", nonce, job["job_id"], job["ntime"], hashes
+                        "found", nonce, job["job_id"], job["ntime"], hashes - reported_hashes
                     ))
                     stop_event.set()
                     return
                 nonce += CPU_THREADS
+                now = time.monotonic()
+                if now - last_report >= REPORT_INTERVAL:
+                    delta = hashes - reported_hashes
+                    if delta:
+                        result_queue.put(("worker_progress", worker_id, nonce, delta, round(now - started, 3)))
+                        reported_hashes = hashes
+                    last_report = now
 
-        if hashes:
-            result_queue.put(("progress", worker_id, hashes))
+        if hashes > reported_hashes:
+            result_queue.put(("progress", worker_id, hashes - reported_hashes))
+        result_queue.put(("worker_stop", worker_id, hashes, round(time.monotonic() - started, 3)))
     except Exception as exc:
         result_queue.put(("error", worker_id, str(exc)))
 
@@ -478,6 +491,7 @@ def start_workers(job):
         )
         process.start()
         workers.append(process)
+        debug_log("Worker process started", worker_id=worker_id, pid=process.pid, job_id=job["job_id"])
 
     return workers, stop_event, result_queue, extranonce2
 
@@ -534,6 +548,9 @@ def submit_share(job_id, extranonce2, ntime, nonce):
     payload = submit_payload(
         job_id, extranonce2, ntime, nonce, submit_id
     )
+    debug_log("Share submission attempt", submit_id=submit_id, job_id=job_id,
+              nonce="%08x" % nonce, extranonce2=extranonce2, ntime=ntime,
+              wallet=ADDRESS, payload_method=payload["method"])
 
     try:
         with ctx.upstream_send_lock:
@@ -547,6 +564,8 @@ def submit_share(job_id, extranonce2, ntime, nonce):
     metrics.share_submitted()
     logg("[*] Share submitted: id=%s job=%s nonce=%08x" %
          (submit_id, job_id, nonce))
+    structured_logger.event("share_submitted", submit_id=submit_id, job_id=job_id,
+                            nonce="%08x" % nonce, extranonce2=extranonce2, ntime=ntime)
     return submit_id
 
 
@@ -644,6 +663,11 @@ def upstream_listener(sock):
                                     % (msg_id, elapsed, msg.get("error") or ""),
                                     Style.RESET_ALL,
                                 )
+                            structured_logger.event(
+                                "share_accepted" if accepted else "share_rejected",
+                                submit_id=msg_id, latency_seconds=round(elapsed, 6),
+                                error=msg.get("error"), result=msg.get("result")
+                            )
                             logg(
                                 "[*] Share %s: id=%s latency=%.3fs error=%s"
                                 % (
@@ -655,6 +679,7 @@ def upstream_listener(sock):
                             )
                         else:
                             logg("[*] Upstream response: %s" % msg)
+                            debug_log("Unmatched upstream response", response=msg)
 
                 except Exception as exc:
                     logg("[!] Upstream message handler error: %s" % exc)
@@ -692,6 +717,7 @@ def expire_pending_submits(force=False):
         print(Fore.RED, "[!] Share response timeout:", submit_id)
         logg("[!] Share response timeout: id=%s after %.1fs" % (submit_id, SUBMIT_TIMEOUT))
         structured_logger.event("share_timeout", submit_id=submit_id, timeout_seconds=SUBMIT_TIMEOUT)
+        debug_log("Share response timeout", submit_id=submit_id, timeout_seconds=SUBMIT_TIMEOUT)
 
 
 def _validate_hex(value, length, field):
@@ -748,6 +774,7 @@ def update_job(params):
     ) = params
 
     with ctx.job_lock:
+        previous_job_id = ctx.job_id
         ctx.job_id = job_id
         ctx.prevhash = prevhash
         ctx.coinb1 = coinb1
@@ -758,6 +785,17 @@ def update_job(params):
         ctx.ntime = ntime
         ctx.clean_jobs = clean_jobs
         ctx.job_generation += 1
+        generation = ctx.job_generation
+    debug_log("Job lifecycle update", previous_job_id=previous_job_id,
+              job_id=job_id, generation=generation, nbits=nbits,
+              ntime=ntime, clean_jobs=clean_jobs, merkle_branches=len(merkle_branch))
+    try:
+        decoded_target = compact_to_target(nbits)
+        debug_log("Target decoded", job_id=job_id, nbits=nbits,
+                  target_hex="%064x" % decoded_target, target_bits=decoded_target.bit_length())
+    except (TypeError, ValueError) as exc:
+        debug_log("Target decode failed", job_id=job_id, nbits=nbits, error=repr(exc))
+        raise
 
 
 def current_job():
@@ -780,12 +818,16 @@ def current_job():
 
 
 def connect_upstream():
+    debug_log("Connection attempt", host=UPSTREAM_HOST, port=UPSTREAM_PORT,
+              wallet=ADDRESS, reconnect_delay=RECONNECT_DELAY)
     sock = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=20)
     sock.settimeout(5)
     ctx.upstream_sock = sock
 
     print(Fore.GREEN, "[*] Connected to %s:%s" %
           (UPSTREAM_HOST, UPSTREAM_PORT))
+    debug_log("Connection established", host=UPSTREAM_HOST, port=UPSTREAM_PORT,
+              socket_timeout=5)
     logg("[*] Connected to upstream %s:%s" % (UPSTREAM_HOST, UPSTREAM_PORT))
 
     send_json(sock, {
@@ -912,6 +954,9 @@ def miner_loop():
                         "[*] New job: id=%s nbits=%s target=%064x ntime=%s clean_jobs=%s"
                         % (job["job_id"], job["nbits"], target, job["ntime"], job["clean_jobs"])
                     )
+                    debug_log("Target ready for native engine", job_id=job["job_id"],
+                              target_hex="%064x" % target, target_bits=target.bit_length(),
+                              header_prefix_bytes=len(header_prefix), nonce_space=2**32)
 
                 new_job = globals()["current_job"]()
                 if new_job is None:
@@ -1016,6 +1061,9 @@ def miner_loop():
                         hashrate_hs=round(rate, 3),
                         hashrate_mhs=round(rate / 1_000_000, 6),
                         pool_difficulty=ctx.upstream_difficulty,
+                        memory=memory_snapshot(),
+                        workers=worker_count_snapshot(),
+                        elapsed_uptime=metrics.snapshot()["uptime_s"],
                     )
                     render_dashboard(rate, hashes_since_report)
                     hashes_since_report = 0
@@ -1041,6 +1089,11 @@ def miner_loop():
 
         stop_workers(workers, stop_event) if workers else None
         workers, stop_event, result_queue, extranonce2 = start_workers(job)
+        debug_log("Python job mining started", job_id=job["job_id"],
+                  target_hex="%064x" % compact_to_target(job["nbits"]),
+                  target_bits=compact_to_target(job["nbits"]).bit_length(),
+                  extranonce2_size=len(extranonce2) // 2, workers=len(workers),
+                  nonce_space=2**32)
 
         print(
             Fore.CYAN,
@@ -1064,7 +1117,29 @@ def miner_loop():
                 while True:
                     event = result_queue.get_nowait()
 
-                    if event[0] == "progress":
+                    if event[0] == "worker_start":
+                        _, worker_id, worker_job, target, prefix_len = event
+                        debug_log("Worker started", worker_id=worker_id, job_id=worker_job,
+                                  target_hex="%064x" % target, header_prefix_bytes=prefix_len,
+                                  nonce_start=worker_id, nonce_stride=CPU_THREADS)
+
+                    elif event[0] == "worker_progress":
+                        _, worker_id, next_nonce, delta_hashes, elapsed = event
+                        debug_log("Nonce range progress", worker_id=worker_id,
+                                  job_id=job["job_id"], next_nonce="%08x" % min(next_nonce, 0xFFFFFFFF),
+                                  hashes_since_last_report=delta_hashes, elapsed_seconds=elapsed,
+                                  hashrate_hs=round(delta_hashes / max(REPORT_INTERVAL, 0.001), 3),
+                                  nonce_stride=CPU_THREADS)
+                        hashes_since_report += delta_hashes
+                        ctx.total_hashes += delta_hashes
+                        metrics.add_hashes(delta_hashes)
+
+                    elif event[0] == "worker_stop":
+                        _, worker_id, worker_hashes, elapsed = event
+                        debug_log("Worker stopped", worker_id=worker_id, job_id=job["job_id"],
+                                  hashes=worker_hashes, elapsed_seconds=elapsed)
+
+                    elif event[0] == "progress":
                         hashes = event[2]
                         hashes_since_report += hashes
                         ctx.total_hashes += hashes
@@ -1114,6 +1189,7 @@ def miner_loop():
 
                     elif event[0] == "error":
                         print(Fore.RED, "[!] CPU worker error:", event[2])
+                        debug_log("Worker error", worker_id=event[1], job_id=job["job_id"], error=event[2])
 
             except Exception:
                 pass
@@ -1132,6 +1208,9 @@ def miner_loop():
                     hashrate_hs=round(rate, 3),
                     hashrate_mhs=round(rate / 1_000_000, 6),
                     pool_difficulty=ctx.upstream_difficulty,
+                    memory=memory_snapshot(),
+                    workers=worker_count_snapshot(),
+                    elapsed_uptime=metrics.snapshot()["uptime_s"],
                 )
                 render_dashboard(rate, hashes_since_report)
                 hashes_since_report = 0
@@ -1167,8 +1246,10 @@ def run():
 
     if submit_selftest():
         print(Fore.GREEN, "[*] Stratum submit payload self-test: PASS")
+        debug_log("Self-test passed", test="stratum_submit_payload")
     else:
         print(Fore.RED, "[!] Stratum submit payload self-test: FAILED")
+        debug_log("Self-test failed", test="stratum_submit_payload")
         raise RuntimeError("Submit payload self-test failed")
 
     while not ctx.fShutdown:
@@ -1199,6 +1280,9 @@ def run():
             ctx.upstream_alive = False
             print(Fore.RED, "[!] Upstream error:", exc)
             logg("[!] Upstream error: %s" % exc)
+            debug_log("Connection/session failure", error=repr(exc),
+                      host=UPSTREAM_HOST, port=UPSTREAM_PORT,
+                      reconnect_delay=RECONNECT_DELAY)
 
         finally:
             ctx.connected = False
