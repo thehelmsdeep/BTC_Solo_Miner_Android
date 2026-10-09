@@ -79,6 +79,29 @@ Keep the phone cool and plugged in during long runs. Mobile CPUs can throttle un
 This is CPU solo mining. Finding a Bitcoin block is extremely unlikely at mobile/CPU hash rates; this project is primarily for experimentation and learning.
 
 
+## Example Mining Dashboard
+
+The following is an example of the live dashboard shown while the miner is running:
+
+```text
+============== CPU Solo Miner ==============
+Wallet       : bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4
+Status       : Mining...
+Hashrate     : 47.533725 MH/s
+Interval Hash: 237764608
+Total Hashes : 1523466240
+Submitted    : 0
+Accepted     : 0
+Rejected     : 0
+Pool Diff    : 10000
+Last Job     : 6ac58e0100001b0b
+Debug Log    : miner-debug.log
+Event Log    : miner-events.jsonl
+================================================
+```
+
+> **Note:** These are example values copied from one runtime snapshot, not guaranteed or live values. `Submitted: 0`, `Accepted: 0`, and `Rejected: 0` mean no shares are shown as submitted or resolved in this snapshot; check the runtime logs to diagnose the reason.
+
 ## Diagnostics
 
 All diagnostics are offline except the normal miner run:
