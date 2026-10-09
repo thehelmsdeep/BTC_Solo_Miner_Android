@@ -55,6 +55,11 @@ def logg(msg):
     structured_logger.event("log", message=str(msg))
 
 
+def debug_log(message, **fields):
+    """Write diagnostic details to the rotating debug log and JSONL event log."""
+    structured_logger.debug(str(message), **fields)
+
+
 def render_dashboard(rate, interval_hashes=None):
     """Render a compact live status screen without deleting saved log files."""
     # ANSI clear/home works in Termux and modern Windows terminals.
@@ -68,6 +73,10 @@ def render_dashboard(rate, interval_hashes=None):
     print("Submitted    : %d" % ctx.shares_submitted)
     print("Accepted     : %d" % ctx.shares_accepted)
     print("Rejected     : %d" % ctx.shares_rejected)
+    print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
+    print("Last Job     : %s" % (ctx.job_id or "none"))
+    print("Debug Log    : miner-debug.log")
+    print("Event Log    : %s" % structured_logger.event_path)
     print("================================================")
 
 
@@ -576,6 +585,7 @@ def upstream_listener(sock):
                             ctx.upstream_difficulty = params[0]
                         print(Fore.CYAN, "[*] Pool difficulty:",
                               ctx.upstream_difficulty)
+                        debug_log("Pool difficulty updated", difficulty=ctx.upstream_difficulty)
 
                     elif method == "mining.set_extranonce":
                         params = msg.get("params", [])
@@ -595,6 +605,11 @@ def upstream_listener(sock):
                             ctx.upstream_extranonce2_size = size
                             ctx.job_generation += 1
                         print(Fore.CYAN, "[*] Pool extranonce updated")
+                        debug_log(
+                            "Pool extranonce updated",
+                            extranonce1_length=len(params[0]),
+                            extranonce2_size=size,
+                        )
 
                     elif "id" in msg:
                         msg_id = msg.get("id")
@@ -650,6 +665,7 @@ def upstream_listener(sock):
         if not ctx.fShutdown:
             print(Fore.RED, "[!] Upstream listener stopped:", exc)
             logg("[!] Upstream listener stopped: %s" % exc)
+            debug_log("Upstream listener exception", error=repr(exc))
     finally:
         # A reconnect can leave an older daemon listener briefly alive while
         # the next connection is already active. Only the listener that still
@@ -673,6 +689,8 @@ def expire_pending_submits(force=False):
         ctx.shares_rejected += 1
         metrics.share_result(False)
         print(Fore.RED, "[!] Share response timeout:", submit_id)
+        logg("[!] Share response timeout: id=%s after %.1fs" % (submit_id, SUBMIT_TIMEOUT))
+        structured_logger.event("share_timeout", submit_id=submit_id, timeout_seconds=SUBMIT_TIMEOUT)
 
 
 def _validate_hex(value, length, field):
@@ -767,6 +785,7 @@ def connect_upstream():
 
     print(Fore.GREEN, "[*] Connected to %s:%s" %
           (UPSTREAM_HOST, UPSTREAM_PORT))
+    logg("[*] Connected to upstream %s:%s" % (UPSTREAM_HOST, UPSTREAM_PORT))
 
     send_json(sock, {
         "id": 1,
@@ -804,6 +823,7 @@ def connect_upstream():
                 ) = result
                 subscribed = True
                 print(Fore.GREEN, "[*] Stratum subscribe successful")
+                logg("[*] Stratum subscribe successful: extranonce2_size=%s" % ctx.upstream_extranonce2_size)
 
                 send_json(sock, {
                     "id": 2,
@@ -818,6 +838,7 @@ def connect_upstream():
                     )
                 authorized = True
                 print(Fore.GREEN, "[*] Upstream authorization successful")
+                logg("[*] Upstream authorization successful")
 
             elif msg.get("method") == "mining.notify":
                 update_job(msg.get("params", []))
@@ -982,7 +1003,19 @@ def miner_loop():
 
                 now = time.monotonic()
                 if now - last_report >= REPORT_INTERVAL:
-                    rate = hashes_since_report / max(now - last_report, 0.001)
+                    elapsed = max(now - last_report, 0.001)
+                    rate = hashes_since_report / elapsed
+                    debug_log(
+                        "Mining progress",
+                        engine="native",
+                        job_id=current_job["job_id"],
+                        interval_hashes=hashes_since_report,
+                        total_hashes=ctx.total_hashes,
+                        elapsed_seconds=round(elapsed, 3),
+                        hashrate_hs=round(rate, 3),
+                        hashrate_mhs=round(rate / 1_000_000, 6),
+                        pool_difficulty=ctx.upstream_difficulty,
+                    )
                     render_dashboard(rate, hashes_since_report)
                     hashes_since_report = 0
                     last_report = now
@@ -1086,7 +1119,19 @@ def miner_loop():
 
             now = time.monotonic()
             if now - last_report >= REPORT_INTERVAL:
-                rate = hashes_since_report / max(now - last_report, 0.001)
+                elapsed = max(now - last_report, 0.001)
+                rate = hashes_since_report / elapsed
+                debug_log(
+                    "Mining progress",
+                    engine="python",
+                    job_id=job["job_id"],
+                    interval_hashes=hashes_since_report,
+                    total_hashes=ctx.total_hashes,
+                    elapsed_seconds=round(elapsed, 3),
+                    hashrate_hs=round(rate, 3),
+                    hashrate_mhs=round(rate / 1_000_000, 6),
+                    pool_difficulty=ctx.upstream_difficulty,
+                )
                 render_dashboard(rate, hashes_since_report)
                 hashes_since_report = 0
                 last_report = now
