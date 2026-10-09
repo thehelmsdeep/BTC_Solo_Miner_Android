@@ -4,7 +4,10 @@ The module has no third-party dependencies. Memory usage is best-effort and
 uses psutil when installed, /proc on Linux/Android, or resource on Unix.
 """
 import os
-import resource
+try:
+    import resource
+except ImportError:  # Windows
+    resource = None
 import threading
 import time
 
@@ -35,9 +38,10 @@ def memory_snapshot():
         pass
 
     try:
-        # ru_maxrss is KiB on Linux, bytes on macOS.
-        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        result["peak_rss_bytes"] = int(peak if os.sys.platform == "darwin" else peak * 1024)
+        if resource is not None:
+            # ru_maxrss is KiB on Linux, bytes on macOS.
+            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            result["peak_rss_bytes"] = int(peak if os.sys.platform == "darwin" else peak * 1024)
     except (AttributeError, OSError, ValueError):
         pass
     return result
