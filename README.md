@@ -1,4 +1,4 @@
-# solo_miner_android
+
 
 Android/Termux build of the solo Bitcoin CPU miner.
 
