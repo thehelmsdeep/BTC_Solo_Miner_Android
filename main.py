@@ -216,14 +216,18 @@ def ensure_native():
         selftest = lib.b_m_selftest()
         if selftest != 0:
             print(Fore.RED, "[!] Native SHA256 self-test FAILED (code=%d); using Python SHA256 fallback" % selftest)
+            debug_log("Self-test failed", test="native_sha256", return_code=selftest)
             return None
         print(Fore.GREEN, "[*] Native SHA256 self-test: PASS")
+        debug_log("Self-test passed", test="native_sha256")
 
         engine_test = lib.b_m_engine_selftest()
         if engine_test != 0:
             print(Fore.RED, "[!] Native engine integration self-test FAILED (code=%d)" % engine_test)
+            debug_log("Self-test failed", test="native_engine_integration", return_code=engine_test)
             return None
         print(Fore.GREEN, "[*] Native engine integration self-test: PASS")
+        debug_log("Self-test passed", test="native_engine_integration")
         _native=lib
         return lib
     except OSError as exc:
@@ -444,7 +448,7 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
                 if now - last_report >= REPORT_INTERVAL:
                     delta = hashes - reported_hashes
                     if delta:
-                        result_queue.put(("worker_progress", worker_id, nonce, delta, round(now - started, 3)))
+                        result_queue.put(("worker_progress", worker_id, nonce, delta, round(now - last_report, 3)))
                         reported_hashes = hashes
                     last_report = now
 
@@ -1128,7 +1132,7 @@ def miner_loop():
                         debug_log("Nonce range progress", worker_id=worker_id,
                                   job_id=job["job_id"], next_nonce="%08x" % min(next_nonce, 0xFFFFFFFF),
                                   hashes_since_last_report=delta_hashes, elapsed_seconds=elapsed,
-                                  hashrate_hs=round(delta_hashes / max(REPORT_INTERVAL, 0.001), 3),
+                                  hashrate_hs=round(delta_hashes / max(elapsed, 0.001), 3),
                                   nonce_stride=CPU_THREADS)
                         hashes_since_report += delta_hashes
                         ctx.total_hashes += delta_hashes
