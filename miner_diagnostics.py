@@ -24,7 +24,8 @@ def memory_snapshot():
         result["process_count"] = len(psutil.Process().children(recursive=True)) + 1
         result["memory_source"] = "psutil"
         return result
-    except (ImportError, OSError, RuntimeError):
+    except Exception:
+        # Diagnostics must never interrupt mining if an optional provider fails.
         pass
 
     try:
