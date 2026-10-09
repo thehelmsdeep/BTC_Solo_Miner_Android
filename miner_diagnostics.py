@@ -47,12 +47,12 @@ def memory_snapshot():
     return result
 
 
-def worker_count_snapshot():
+def worker_count_snapshot(configured_threads=None):
     try:
         import multiprocessing
         return {
             "active_children": len(multiprocessing.active_children()),
-            "configured_threads": os.getenv("CPU_THREADS", "auto"),
+            "configured_threads": configured_threads or os.getenv("CPU_THREADS", "auto"),
         }
     except (ImportError, RuntimeError):
         return {"configured_threads": os.getenv("CPU_THREADS", "auto")}
