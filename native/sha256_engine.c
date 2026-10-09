@@ -1010,6 +1010,12 @@ int b_m_engine_exhausted(BM_ENGINE *e) {
     return exhausted;
 }
 
+/* Approximate upper boundary of nonce ranges already allocated to workers. */
+uint64_t b_m_engine_next_nonce(BM_ENGINE *e) {
+    if (!e) return 0;
+    return __atomic_load_n(&e->next_nonce, __ATOMIC_RELAXED);
+}
+
 void b_m_engine_stop_job(BM_ENGINE *e) {
     if (!e) return;
     engine_lock(e);
