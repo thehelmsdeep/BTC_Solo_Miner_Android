@@ -185,8 +185,24 @@ def ensure_native():
         flags = ["-O3", *cpu_flags, "-flto", "-funroll-loops",
                  "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared"]
 
-    cmd = [compiler, *flags, "-o", str(NATIVE_LIB), str(source_file)]
-    build_signature = "\n".join([str(pathlib.Path(compiler).resolve()), *flags])
+    machine = platform.machine().lower()
+    asm_file = NATIVE_DIR / "sha256_arm64.S"
+    use_arm_asm = (
+        os.name != "nt"
+        and machine in ("aarch64", "arm64")
+        and asm_file.exists()
+    )
+    source_files = [source_file]
+    if use_arm_asm:
+        source_files.append(asm_file)
+        flags = [*flags, "-DBTC_MINER_ARM64_ASM"]
+
+    cmd = [compiler, *flags, "-o", str(NATIVE_LIB), *(str(path) for path in source_files)]
+    build_signature = "\n".join([
+        str(pathlib.Path(compiler).resolve()),
+        *flags,
+        *(str(path.resolve()) for path in source_files),
+    ])
     try:
         old_signature = build_stamp.read_text().strip() if build_stamp.exists() else ""
     except OSError:
@@ -196,7 +212,7 @@ def ensure_native():
         not NATIVE_LIB.exists()
         or not build_stamp.exists()
         or old_signature != build_signature
-        or source_file.stat().st_mtime > NATIVE_LIB.stat().st_mtime
+        or any(path.stat().st_mtime > NATIVE_LIB.stat().st_mtime for path in source_files)
     )
     if needs_build:
         NATIVE_DIR.mkdir(exist_ok=True)
