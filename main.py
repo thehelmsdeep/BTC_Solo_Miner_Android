@@ -186,7 +186,7 @@ def ensure_native():
                  "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared"]
 
     cmd = [compiler, *flags, "-o", str(NATIVE_LIB), str(source_file)]
-    build_signature = "\\n".join([str(pathlib.Path(compiler).resolve()), *flags])
+    build_signature = "\n".join([str(pathlib.Path(compiler).resolve()), *flags])
     try:
         old_signature = build_stamp.read_text().strip() if build_stamp.exists() else ""
     except OSError:
@@ -202,7 +202,7 @@ def ensure_native():
         NATIVE_DIR.mkdir(exist_ok=True)
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            build_stamp.write_text(build_signature + "\\n")
+            build_stamp.write_text(build_signature + "\n")
             print(Fore.GREEN, f"[*] Native SHA256 engine built with {pathlib.Path(compiler).name}: {' '.join(flags)}")
         except (OSError, subprocess.CalledProcessError) as exc:
             detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
