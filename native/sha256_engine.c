@@ -1344,6 +1344,35 @@ int b_m_selftest(void) {
         hash_nonce_arm_digest(&base, t0, t1, t2, nonce, arm_digest);
         if (memcmp(arm_digest, expected_digest, 32) != 0) return 4;
         if (!hash_nonce_arm(&base, t0, t1, t2, target, nonce)) return 4;
+
+        /* Verify the paired comparator against the scalar comparator across
+         * exact, impossible, and permissive targets and nonce boundaries. */
+        {
+            static const uint32_t pair_nonces[] = {
+                0U, 1U, 0x12345678U, 0x7fffffffU, 0xfffffffeU
+            };
+            uint8_t targets[3][32];
+            memset(targets[0], 0, 32);
+            memset(targets[1], 0xff, 32);
+            hash_nonce_arm_digest(&base, t0, t1, t2, nonce, targets[2]);
+            for (size_t ni = 0; ni < sizeof(pair_nonces)/sizeof(pair_nonces[0]); ++ni) {
+                uint32_t n0 = pair_nonces[ni], n1 = n0 + 1U;
+                for (size_t ti = 0; ti < 3; ++ti) {
+                    uint32_t tw[8];
+                    for (int j = 0; j < 8; ++j) {
+                        tw[j] = (uint32_t)targets[ti][j*4]
+                              | ((uint32_t)targets[ti][j*4+1] << 8)
+                              | ((uint32_t)targets[ti][j*4+2] << 16)
+                              | ((uint32_t)targets[ti][j*4+3] << 24);
+                    }
+                    uint8_t expected_hits =
+                        (uint8_t)((hash_nonce_arm_words(&base,t0,t1,t2,tw,n0) ? 1U : 0U) |
+                                  (hash_nonce_arm_words(&base,t0,t1,t2,tw,n1) ? 2U : 0U));
+                    uint8_t actual_hits = hash_nonce_arm_pair_words(&base,t0,t1,t2,tw,n0,n1);
+                    if (actual_hits != expected_hits) return 4;
+                }
+            }
+        }
     }
 #endif
 
