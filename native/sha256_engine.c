@@ -501,31 +501,6 @@ static inline int hash_nonce_arm_words(const SHA256_CTX *base,
 /* Compute two independent nonce hashes before comparing either target.
  * This exposes instruction-level parallelism to the compiler on ARM cores:
  * the two SHA256 pipelines have no data dependencies on each other. */
-static inline uint8_t hash_nonce_arm_pair_words(const SHA256_CTX *base,
-                                                uint32_t t0, uint32_t t1, uint32_t t2,
-                                                const uint32_t target_words[8],
-                                                uint32_t nonce0, uint32_t nonce1) {
-    uint32_t state0[8], state1[8];
-    hash_nonce_arm_state(base, t0, t1, t2, nonce0, state0);
-    hash_nonce_arm_state(base, t0, t1, t2, nonce1, state1);
-
-    /* status: 0 = equal so far, 1 = below target, 2 = above target. */
-    unsigned status0 = 0, status1 = 0;
-    for (int i = 7; i >= 0 && (status0 == 0 || status1 == 0); --i) {
-        if (status0 == 0) {
-            uint32_t h = BSWAP32(state0[i]);
-            if (h < target_words[i]) status0 = 1;
-            else if (h > target_words[i]) status0 = 2;
-        }
-        if (status1 == 0) {
-            uint32_t h = BSWAP32(state1[i]);
-            if (h < target_words[i]) status1 = 1;
-            else if (h > target_words[i]) status1 = 2;
-        }
-    }
-    return (uint8_t)((status0 != 2 ? 1U : 0U) |
-                     (status1 != 2 ? 2U : 0U));
-}
 
 static inline int hash_nonce_arm(const SHA256_CTX *base,
                                  uint32_t t0, uint32_t t1, uint32_t t2,
@@ -917,35 +892,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
         /* Keep the ARM crypto path inside the worker's prepared-job loop:
          * prefix words and target words are decoded once, not once per nonce. */
-        for (; n + 1 < end; n += 2) {
-            uint8_t hits = hash_nonce_arm_pair_words(
-                &base, tail0, tail1, tail2, target_words,
-                (uint32_t)n, (uint32_t)(n + 1));
-            local += 2;
-            if (hits) {
-                uint32_t hit_nonce = (hits & 1U) ? (uint32_t)n : (uint32_t)(n + 1);
-                engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
-                    e->found_valid=1;
-                    e->found_nonce=hit_nonce;
-                    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
-                }
-                engine_unlock(e);
-                __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
-                return;
-            }
-            if ((local & 0x3FFF)==0) {
-                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
-                if(stop) {
-                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
-                    return;
-                }
-            }
-        }
-        if (n < end) {
+        for (; n < end; ++n) {
             if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
@@ -958,6 +905,16 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 return;
             }
             ++local;
+            if ((local & 0x3FFF)==0) {
+                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
+                if(stop) {
+                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                    return;
+                }
+            }
         }
 #else
         for (; n < end; ++n) {
@@ -1345,34 +1302,6 @@ int b_m_selftest(void) {
         if (memcmp(arm_digest, expected_digest, 32) != 0) return 4;
         if (!hash_nonce_arm(&base, t0, t1, t2, target, nonce)) return 4;
 
-        /* Verify the paired comparator against the scalar comparator across
-         * exact, impossible, and permissive targets and nonce boundaries. */
-        {
-            static const uint32_t pair_nonces[] = {
-                0U, 1U, 0x12345678U, 0x7fffffffU, 0xfffffffeU
-            };
-            uint8_t targets[3][32];
-            memset(targets[0], 0, 32);
-            memset(targets[1], 0xff, 32);
-            hash_nonce_arm_digest(&base, t0, t1, t2, nonce, targets[2]);
-            for (size_t ni = 0; ni < sizeof(pair_nonces)/sizeof(pair_nonces[0]); ++ni) {
-                uint32_t n0 = pair_nonces[ni], n1 = n0 + 1U;
-                for (size_t ti = 0; ti < 3; ++ti) {
-                    uint32_t tw[8];
-                    for (int j = 0; j < 8; ++j) {
-                        tw[j] = (uint32_t)targets[ti][j*4]
-                              | ((uint32_t)targets[ti][j*4+1] << 8)
-                              | ((uint32_t)targets[ti][j*4+2] << 16)
-                              | ((uint32_t)targets[ti][j*4+3] << 24);
-                    }
-                    uint8_t expected_hits =
-                        (uint8_t)((hash_nonce_arm_words(&base,t0,t1,t2,tw,n0) ? 1U : 0U) |
-                                  (hash_nonce_arm_words(&base,t0,t1,t2,tw,n1) ? 2U : 0U));
-                    uint8_t actual_hits = hash_nonce_arm_pair_words(&base,t0,t1,t2,tw,n0,n1);
-                    if (actual_hits != expected_hits) return 4;
-                }
-            }
-        }
     }
 #endif
 
