@@ -202,6 +202,16 @@ def ensure_native():
         source_files.append(asm_file)
         flags = [*flags, "-DBTC_MINER_ARM64_ASM"]
 
+    # Experimental four-nonce software pipeline; opt in only for benchmarks.
+    quad_setting = os.getenv("BTC_MINER_ARM64_QUAD", "0").strip().lower()
+    if (
+        os.name != "nt"
+        and machine in ("aarch64", "arm64")
+        and not use_arm_asm
+        and quad_setting in ("1", "true", "yes", "on")
+    ):
+        flags = [*flags, "-DBTC_MINER_ARM64_QUAD"]
+
     cmd = [compiler, *flags, "-o", str(NATIVE_LIB), *(str(path) for path in source_files)]
     build_signature = "\n".join([
         str(pathlib.Path(compiler).resolve()),
