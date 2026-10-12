@@ -481,26 +481,34 @@ static inline void hash_nonce_arm_digest(const SHA256_CTX *base,
     }
 }
 
-static inline int hash_nonce_arm(const SHA256_CTX *base,
-                                 uint32_t t0, uint32_t t1, uint32_t t2,
-                                 const uint8_t target[32], uint32_t nonce) {
+static inline int hash_nonce_arm_words(const SHA256_CTX *base,
+                                       uint32_t t0, uint32_t t1, uint32_t t2,
+                                       const uint32_t target_words[8],
+                                       uint32_t nonce) {
     uint32_t state[8];
     hash_nonce_arm_state(base, t0, t1, t2, nonce, state);
 
-    /* Compare the final SHA-256 state directly. Bitcoin interprets the
-     * SHA256d digest as a little-endian integer, so compare byte-swapped
-     * state words from most-significant to least-significant. Avoid writing
-     * the 32-byte digest for every nonce in the hottest ARM SHA2 path. */
+    /* The worker decodes target_words once per job, so this hot path does
+     * no target-byte loads, shifts, or digest materialization per nonce. */
     for (int i = 7; i >= 0; --i) {
-        uint32_t target_word = (uint32_t)target[i * 4]
-                             | ((uint32_t)target[i * 4 + 1] << 8)
-                             | ((uint32_t)target[i * 4 + 2] << 16)
-                             | ((uint32_t)target[i * 4 + 3] << 24);
         uint32_t hash_word = BSWAP32(state[i]);
-        if (hash_word < target_word) return 1;
-        if (hash_word > target_word) return 0;
+        if (hash_word < target_words[i]) return 1;
+        if (hash_word > target_words[i]) return 0;
     }
     return 1;
+}
+
+static inline int hash_nonce_arm(const SHA256_CTX *base,
+                                 uint32_t t0, uint32_t t1, uint32_t t2,
+                                 const uint8_t target[32], uint32_t nonce) {
+    uint32_t target_words[8];
+    for (int i = 0; i < 8; ++i) {
+        target_words[i] = (uint32_t)target[i * 4]
+                        | ((uint32_t)target[i * 4 + 1] << 8)
+                        | ((uint32_t)target[i * 4 + 2] << 16)
+                        | ((uint32_t)target[i * 4 + 3] << 24);
+    }
+    return hash_nonce_arm_words(base, t0, t1, t2, target_words, nonce);
 }
 #endif
 
@@ -799,6 +807,11 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                           ((uint32_t)target[i*4+3] << 24);
     }
 
+    const uint8_t *job_tail = prefix + 64;
+    const uint32_t job_tail0 = ((uint32_t)job_tail[0]<<24)|((uint32_t)job_tail[1]<<16)|((uint32_t)job_tail[2]<<8)|job_tail[3];
+    const uint32_t job_tail1 = ((uint32_t)job_tail[4]<<24)|((uint32_t)job_tail[5]<<16)|((uint32_t)job_tail[6]<<8)|job_tail[7];
+    const uint32_t job_tail2 = ((uint32_t)job_tail[8]<<24)|((uint32_t)job_tail[9]<<16)|((uint32_t)job_tail[10]<<8)|job_tail[11];
+
     for (;;) {
         if (__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
             __atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
@@ -816,10 +829,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 
         uint64_t n = start;
         uint64_t local = 0;
-        const uint8_t *tail = prefix + 64;
-        const uint32_t tail0 = ((uint32_t)tail[0]<<24)|((uint32_t)tail[1]<<16)|((uint32_t)tail[2]<<8)|tail[3];
-        const uint32_t tail1 = ((uint32_t)tail[4]<<24)|((uint32_t)tail[5]<<16)|((uint32_t)tail[6]<<8)|tail[7];
-        const uint32_t tail2 = ((uint32_t)tail[8]<<24)|((uint32_t)tail[9]<<16)|((uint32_t)tail[10]<<8)|tail[11];
+        const uint32_t tail0 = job_tail0, tail1 = job_tail1, tail2 = job_tail2;
 
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86_FP)
 #if defined(__AVX2__)
@@ -875,8 +885,11 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             }
         }
 #endif
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+        /* Keep the ARM crypto path inside the worker's prepared-job loop:
+         * prefix words and target words are decoded once, not once per nonce. */
         for (; n < end; ++n) {
-            if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
+            if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
                     e->found_valid=1;
@@ -899,6 +912,33 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 }
             }
         }
+#else
+        for (; n < end; ++n) {
+            if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
+                engine_lock(e);
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                    e->found_valid=1;
+                    e->found_nonce=(uint32_t)n;
+                    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
+                }
+                engine_unlock(e);
+                __atomic_fetch_add(&e->total_hashes,local+1,__ATOMIC_RELAXED);
+                return;
+            }
+            ++local;
+            if ((local & 0x3FFF)==0) {
+                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
+                if(stop) {
+                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                    return;
+                }
+            }
+        }
+#endif
 
         if (local)
             __atomic_fetch_add(&e->total_hashes, local, __ATOMIC_RELAXED);
