@@ -49,7 +49,6 @@ def run_once(lib, threads: int, seconds: float, run_no: int) -> float:
     delta = ctypes.c_uint64()
     total = 0
     started = time.perf_counter()
-    last_change = started
     try:
         if lib.b_m_engine_set_job(engine, prefix, target) != 1:
             raise RuntimeError("engine rejected benchmark job")
@@ -59,7 +58,6 @@ def run_once(lib, threads: int, seconds: float, run_no: int) -> float:
                 raise RuntimeError("impossible target unexpectedly hit")
             total += delta.value
             if delta.value:
-                last_change = time.perf_counter()
             time.sleep(0.01)
 
         lib.b_m_engine_stop_job(engine)
@@ -73,12 +71,11 @@ def run_once(lib, threads: int, seconds: float, run_no: int) -> float:
                 raise RuntimeError("impossible target unexpectedly hit")
             total += delta.value
             if delta.value:
-                last_change = time.perf_counter()
                 stable_reads = 0
             else:
                 stable_reads += 1
 
-        elapsed = last_change - started
+        elapsed = time.perf_counter() - started
         if total <= 0 or elapsed <= 0:
             raise RuntimeError("engine reported no hashes")
         rate = total / elapsed
