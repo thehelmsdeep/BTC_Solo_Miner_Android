@@ -930,7 +930,6 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
                          __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
                          !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
                          __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
                 if(stop) {
                     if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
