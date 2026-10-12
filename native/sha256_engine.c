@@ -325,6 +325,13 @@ static inline void sha256_8_hashes(const SHA256_CTX *base,
 /* ARMv8 SHA-256 compression. Input words are already decoded to SHA-256
  * big-endian numeric words, so they are loaded directly. The round schedule
  * follows the standard ARMv8 SHA256 intrinsic dataflow. */
+#if defined(BTC_MINER_ARM64_ASM)
+extern void b_m_arm_sha256_compress_asm(uint32_t h[8], const uint32_t w[16],
+                                        const uint32_t k[64]);
+static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
+    b_m_arm_sha256_compress_asm(h, w, K);
+}
+#else
 static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     uint32x4_t STATE0 = vld1q_u32(&h[0]);
     uint32x4_t STATE1 = vld1q_u32(&h[4]);
@@ -442,6 +449,7 @@ static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     vst1q_u32(&h[0], STATE0);
     vst1q_u32(&h[4], STATE1);
 }
+#endif
 static inline void hash_nonce_arm_state(const SHA256_CTX *base,
                                            uint32_t t0, uint32_t t1,
                                            uint32_t t2, uint32_t nonce,
