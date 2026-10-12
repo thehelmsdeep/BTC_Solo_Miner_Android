@@ -187,12 +187,15 @@ def ensure_native():
 
     machine = platform.machine().lower()
     asm_file = NATIVE_DIR / "sha256_arm64.S"
-    asm_setting = os.getenv("BTC_MINER_ARM64_ASM", "auto").strip().lower()
+    # Keep the verified C/ARM SHA2-intrinsics implementation as the default.
+    # Enable the hand-written assembly only for explicit experiments:
+    # BTC_MINER_ARM64_ASM=1
+    asm_setting = os.getenv("BTC_MINER_ARM64_ASM", "0").strip().lower()
     use_arm_asm = (
         os.name != "nt"
         and machine in ("aarch64", "arm64")
         and asm_file.exists()
-        and asm_setting not in ("0", "false", "no", "off")
+        and asm_setting in ("1", "true", "yes", "on")
     )
     source_files = [source_file]
     if use_arm_asm:
