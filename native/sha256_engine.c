@@ -509,27 +509,22 @@ static inline uint8_t hash_nonce_arm_pair_words(const SHA256_CTX *base,
     hash_nonce_arm_state(base, t0, t1, t2, nonce0, state0);
     hash_nonce_arm_state(base, t0, t1, t2, nonce1, state1);
 
-    uint8_t hits = 0;
-    for (int i = 7; i >= 0; --i) {
-        uint32_t h0 = BSWAP32(state0[i]);
-        uint32_t h1 = BSWAP32(state1[i]);
-        uint32_t t = target_words[i];
-        if (!(hits & 1U)) {
-            if (h0 < t) hits |= 1U;
-            else if (h0 > t) hits |= 4U;
+    /* status: 0 = equal so far, 1 = below target, 2 = above target. */
+    unsigned status0 = 0, status1 = 0;
+    for (int i = 7; i >= 0 && (status0 == 0 || status1 == 0); --i) {
+        if (status0 == 0) {
+            uint32_t h = BSWAP32(state0[i]);
+            if (h < target_words[i]) status0 = 1;
+            else if (h > target_words[i]) status0 = 2;
         }
-        if (!(hits & 2U)) {
-            if (h1 < t) hits |= 2U;
-            else if (h1 > t) hits |= 8U;
+        if (status1 == 0) {
+            uint32_t h = BSWAP32(state1[i]);
+            if (h < target_words[i]) status1 = 1;
+            else if (h > target_words[i]) status1 = 2;
         }
-        if ((hits & 4U) && (hits & 8U)) return 0;
-        if ((hits & 1U) && (hits & 2U)) return 3U;
-        if ((hits & 1U) && (hits & 8U)) return 1U;
-        if ((hits & 4U) && (hits & 2U)) return 2U;
     }
-    if (!(hits & 4U)) hits |= 1U;
-    if (!(hits & 8U)) hits |= 2U;
-    return hits & 3U;
+    return (uint8_t)((status0 != 2 ? 1U : 0U) |
+                     (status1 != 2 ? 2U : 0U));
 }
 
 static inline int hash_nonce_arm(const SHA256_CTX *base,
