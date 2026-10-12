@@ -8,6 +8,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  arm64-cross-compile:
+    name: ARM64 SHA2 cross-compile
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install AArch64 compiler
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Compile ARMv8 Crypto Extensions path
+        run: |
+          set -euxo pipefail
+          aarch64-linux-gnu-gcc --version
+          aarch64-linux-gnu-gcc -O3 -march=armv8-a+crypto -pthread \
+            -c native/sha256_engine.c -o /tmp/sha256_engine_arm64.o
+
   asan-ubsan:
     name: ASan + UBSan
     runs-on: ubuntu-24.04
