@@ -150,28 +150,63 @@ def ensure_native():
     global _native
     if not NATIVE_ENABLED or _native is not None:
         return _native
+
     source_file = NATIVE_DIR / "sha256_engine.c"
+    build_stamp = NATIVE_LIB.with_suffix(NATIVE_LIB.suffix + ".build-config")
+
+    # Allow controlled compiler/CPU-tuning experiments without editing source.
+    # Defaults preserve the existing GCC-first, generic ARM crypto build.
+    requested_cc = os.getenv("BTC_MINER_CC", "auto").strip()
+    if requested_cc.lower() == "auto":
+        compiler = shutil.which("gcc") or shutil.which("clang") or shutil.which("cc")
+    else:
+        compiler = shutil.which(requested_cc)
+    if not compiler:
+        print(Fore.YELLOW, f"[!] C compiler {requested_cc!r} unavailable; using Python SHA256 fallback")
+        return None
+
+    cpu_tune = os.getenv("BTC_MINER_CPU_TUNE", "generic").strip().lower()
+    if cpu_tune not in ("generic", "native"):
+        print(Fore.YELLOW, "[!] BTC_MINER_CPU_TUNE must be 'generic' or 'native'; using generic")
+        cpu_tune = "generic"
+
+    if os.name == "nt":
+        flags = ["-O3", "-march=native", "-mtune=native", "-flto",
+                 "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG",
+                 "-shared"]
+    else:
+        machine = platform.machine().lower()
+        if cpu_tune == "native":
+            # Opt-in only: let the local compiler select this phone's CPU features.
+            cpu_flags = ["-mcpu=native"]
+        else:
+            march = "armv8-a+crypto" if machine in ("aarch64", "arm64") else "native"
+            cpu_flags = [f"-march={march}", "-mtune=native"]
+        flags = ["-O3", *cpu_flags, "-flto", "-funroll-loops",
+                 "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared"]
+
+    cmd = [compiler, *flags, "-o", str(NATIVE_LIB), str(source_file)]
+    build_signature = "\\n".join([str(pathlib.Path(compiler).resolve()), *flags])
+    try:
+        old_signature = build_stamp.read_text().strip() if build_stamp.exists() else ""
+    except OSError:
+        old_signature = ""
+
     needs_build = (
         not NATIVE_LIB.exists()
+        or not build_stamp.exists()
+        or old_signature != build_signature
         or source_file.stat().st_mtime > NATIVE_LIB.stat().st_mtime
     )
     if needs_build:
-        compiler = shutil.which("gcc") or shutil.which("clang") or shutil.which("cc")
-        if not compiler:
-            print(Fore.YELLOW, "[!] No C compiler found; using Python SHA256 fallback")
-            return None
         NATIVE_DIR.mkdir(exist_ok=True)
-        if os.name == "nt":
-            cmd = [compiler, "-O3", "-march=native", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-shared", "-o", str(NATIVE_LIB), str(source_file)]
-        else:
-            machine = platform.machine().lower()
-            march = "armv8-a+crypto" if machine in ("aarch64", "arm64") else "native"
-            cmd = [compiler, "-O3", f"-march={march}", "-mtune=native", "-flto", "-funroll-loops", "-fomit-frame-pointer", "-DNDEBUG", "-fPIC", "-shared", "-o", str(NATIVE_LIB), str(NATIVE_DIR / "sha256_engine.c")]
         try:
             subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            print(Fore.GREEN, "[*] Native SHA256 engine built")
+            build_stamp.write_text(build_signature + "\\n")
+            print(Fore.GREEN, f"[*] Native SHA256 engine built with {pathlib.Path(compiler).name}: {' '.join(flags)}")
         except (OSError, subprocess.CalledProcessError) as exc:
-            print(Fore.YELLOW, "[!] Native build unavailable; using Python fallback:", exc)
+            detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+            print(Fore.YELLOW, "[!] Native build unavailable; using Python fallback:", detail)
             return None
     try:
         lib=ctypes.CDLL(str(NATIVE_LIB))
