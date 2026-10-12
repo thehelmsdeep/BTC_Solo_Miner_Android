@@ -788,6 +788,10 @@ struct BM_ENGINE {
     uint32_t found_nonce;
     uint8_t prefix[76];
     uint8_t target[32];
+    /* Per-job SHA-256 preparation shared by all persistent workers. */
+    SHA256_CTX job_midstate;
+    uint32_t job_tail_words[3];
+    uint32_t job_target_words[8];
     BM_ENGINE_ARG *args;
 #ifdef _WIN32
     CRITICAL_SECTION lock;
@@ -833,30 +837,22 @@ static void engine_scan(BM_ENGINE_ARG *a) {
     BM_ENGINE *e = a->engine;
     uint8_t prefix[76], target[32];
     SHA256_CTX base;
+    uint32_t target_words[8];
+    uint32_t job_tail0, job_tail1, job_tail2;
     uint64_t generation;
 
     engine_lock(e);
     memcpy(prefix, e->prefix, 76);
     memcpy(target, e->target, 32);
+    /* Snapshot the job's precomputed SHA-256 midstate and decoded words.
+     * All workers reuse these values; they are immutable for this generation. */
+    base = e->job_midstate;
+    memcpy(target_words, e->job_target_words, sizeof(target_words));
+    job_tail0 = e->job_tail_words[0];
+    job_tail1 = e->job_tail_words[1];
+    job_tail2 = e->job_tail_words[2];
     generation = __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED);
     engine_unlock(e);
-
-    init(&base);
-    update(&base, prefix, 64);
-
-    /* Decode the Bitcoin target once per Stratum job. */
-    uint32_t target_words[8];
-    for (int i = 0; i < 8; ++i) {
-        target_words[i] = (uint32_t)target[i*4] |
-                          ((uint32_t)target[i*4+1] << 8) |
-                          ((uint32_t)target[i*4+2] << 16) |
-                          ((uint32_t)target[i*4+3] << 24);
-    }
-
-    const uint8_t *job_tail = prefix + 64;
-    const uint32_t job_tail0 = ((uint32_t)job_tail[0]<<24)|((uint32_t)job_tail[1]<<16)|((uint32_t)job_tail[2]<<8)|job_tail[3];
-    const uint32_t job_tail1 = ((uint32_t)job_tail[4]<<24)|((uint32_t)job_tail[5]<<16)|((uint32_t)job_tail[6]<<8)|job_tail[7];
-    const uint32_t job_tail2 = ((uint32_t)job_tail[8]<<24)|((uint32_t)job_tail[9]<<16)|((uint32_t)job_tail[10]<<8)|job_tail[11];
 
     for (;;) {
         if (__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
@@ -1129,10 +1125,39 @@ BM_ENGINE *b_m_engine_create(uint32_t thread_count) {
 }
 
 int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t target[32]) {
-    if (!e) return 0;
+    if (!e || !prefix || !target) return 0;
+
+    /* Prepare all job-invariant SHA-256 inputs once, not once per worker.
+     * The 64-byte header prefix is the reusable first-block midstate. */
+    SHA256_CTX prepared_midstate;
+    init(&prepared_midstate);
+    update(&prepared_midstate, prefix, 64);
+
+    uint32_t prepared_tail[3];
+    prepared_tail[0] = ((uint32_t)prefix[64] << 24) |
+                       ((uint32_t)prefix[65] << 16) |
+                       ((uint32_t)prefix[66] << 8) | prefix[67];
+    prepared_tail[1] = ((uint32_t)prefix[68] << 24) |
+                       ((uint32_t)prefix[69] << 16) |
+                       ((uint32_t)prefix[70] << 8) | prefix[71];
+    prepared_tail[2] = ((uint32_t)prefix[72] << 24) |
+                       ((uint32_t)prefix[73] << 16) |
+                       ((uint32_t)prefix[74] << 8) | prefix[75];
+
+    uint32_t prepared_target_words[8];
+    for (int i = 0; i < 8; ++i) {
+        prepared_target_words[i] = (uint32_t)target[i*4] |
+                                   ((uint32_t)target[i*4+1] << 8) |
+                                   ((uint32_t)target[i*4+2] << 16) |
+                                   ((uint32_t)target[i*4+3] << 24);
+    }
+
     engine_lock(e);
     memcpy(e->prefix, prefix, 76);
     memcpy(e->target, target, 32);
+    e->job_midstate = prepared_midstate;
+    memcpy(e->job_tail_words, prepared_tail, sizeof(prepared_tail));
+    memcpy(e->job_target_words, prepared_target_words, sizeof(prepared_target_words));
     __atomic_add_fetch(&e->job_generation, 1, __ATOMIC_RELAXED);
     __atomic_store_n(&e->next_nonce, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&e->total_hashes, 0, __ATOMIC_RELAXED);
