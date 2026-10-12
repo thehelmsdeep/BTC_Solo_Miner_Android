@@ -442,16 +442,65 @@ static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     vst1q_u32(&h[0], STATE0);
     vst1q_u32(&h[4], STATE1);
 }
-static inline void hash_nonce_arm_digest(const SHA256_CTX *base,uint32_t t0,uint32_t t1,uint32_t t2,uint32_t nonce,uint8_t digest[32]){
-    uint32_t b1[16]={t0,t1,t2,BSWAP32(nonce),0x80000000U,0,0,0,0,0,0,0,0,0,0,0x00000280U};
-    uint32_t first[8]; memcpy(first,base->h,sizeof(first)); arm_sha256_compress(first,b1);
-    uint32_t b2[16]={first[0],first[1],first[2],first[3],first[4],first[5],first[6],first[7],0x80000000U,0,0,0,0,0,0,0x00000100U};
-    uint32_t st[8]={0x6a09e667U,0xbb67ae85U,0x3c6ef372U,0xa54ff53AU,0x510e527fU,0x9b05688CU,0x1f83d9abU,0x5be0cd19U};
-    arm_sha256_compress(st,b2);
-    for(int i=0;i<8;i++){digest[i*4]=(uint8_t)(st[i]>>24);digest[i*4+1]=(uint8_t)(st[i]>>16);digest[i*4+2]=(uint8_t)(st[i]>>8);digest[i*4+3]=(uint8_t)st[i];}
+static inline void hash_nonce_arm_state(const SHA256_CTX *base,
+                                           uint32_t t0, uint32_t t1,
+                                           uint32_t t2, uint32_t nonce,
+                                           uint32_t state[8]) {
+    uint32_t b1[16] = {
+        t0, t1, t2, BSWAP32(nonce), 0x80000000U,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000280U
+    };
+    uint32_t first[8];
+    memcpy(first, base->h, sizeof(first));
+    arm_sha256_compress(first, b1);
+
+    uint32_t b2[16] = {
+        first[0], first[1], first[2], first[3],
+        first[4], first[5], first[6], first[7],
+        0x80000000U, 0, 0, 0, 0, 0, 0, 0x00000100U
+    };
+    static const uint32_t IV[8] = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
+        0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
+    };
+    memcpy(state, IV, sizeof(IV));
+    arm_sha256_compress(state, b2);
 }
-static inline int hash_nonce_arm(const SHA256_CTX *base,uint32_t t0,uint32_t t1,uint32_t t2,const uint8_t target[32],uint32_t nonce){
-    uint8_t digest[32]; hash_nonce_arm_digest(base,t0,t1,t2,nonce,digest); return le_target(digest,target);
+
+static inline void hash_nonce_arm_digest(const SHA256_CTX *base,
+                                         uint32_t t0, uint32_t t1,
+                                         uint32_t t2, uint32_t nonce,
+                                         uint8_t digest[32]) {
+    uint32_t state[8];
+    hash_nonce_arm_state(base, t0, t1, t2, nonce, state);
+    for (int i = 0; i < 8; ++i) {
+        digest[i * 4] = (uint8_t)(state[i] >> 24);
+        digest[i * 4 + 1] = (uint8_t)(state[i] >> 16);
+        digest[i * 4 + 2] = (uint8_t)(state[i] >> 8);
+        digest[i * 4 + 3] = (uint8_t)state[i];
+    }
+}
+
+static inline int hash_nonce_arm(const SHA256_CTX *base,
+                                 uint32_t t0, uint32_t t1, uint32_t t2,
+                                 const uint8_t target[32], uint32_t nonce) {
+    uint32_t state[8];
+    hash_nonce_arm_state(base, t0, t1, t2, nonce, state);
+
+    /* Compare the final SHA-256 state directly. Bitcoin interprets the
+     * SHA256d digest as a little-endian integer, so compare byte-swapped
+     * state words from most-significant to least-significant. Avoid writing
+     * the 32-byte digest for every nonce in the hottest ARM SHA2 path. */
+    for (int i = 7; i >= 0; --i) {
+        uint32_t target_word = (uint32_t)target[i * 4]
+                             | ((uint32_t)target[i * 4 + 1] << 8)
+                             | ((uint32_t)target[i * 4 + 2] << 16)
+                             | ((uint32_t)target[i * 4 + 3] << 24);
+        uint32_t hash_word = BSWAP32(state[i]);
+        if (hash_word < target_word) return 1;
+        if (hash_word > target_word) return 0;
+    }
+    return 1;
 }
 #endif
 
