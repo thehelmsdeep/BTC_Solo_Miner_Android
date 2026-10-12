@@ -57,7 +57,6 @@ def run_once(lib, threads: int, seconds: float, run_no: int) -> float:
             if lib.b_m_engine_poll(engine, ctypes.byref(found), ctypes.byref(delta)):
                 raise RuntimeError("impossible target unexpectedly hit")
             total += delta.value
-            if delta.value:
             time.sleep(0.01)
 
         lib.b_m_engine_stop_job(engine)
