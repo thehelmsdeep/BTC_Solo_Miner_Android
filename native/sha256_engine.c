@@ -548,6 +548,37 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     return hits;
 }
 
+/* Optional four-lane software pipeline for ARM64 crypto instructions.
+ * Kept opt-in because register pressure differs across phone CPU cores. */
+#if defined(BTC_MINER_ARM64_QUAD)
+static inline unsigned hash_nonce_arm_quad_words(const SHA256_CTX *base,
+                                                  uint32_t t0, uint32_t t1, uint32_t t2,
+                                                  const uint32_t target_words[8],
+                                                  uint32_t nonce0, uint32_t nonce1,
+                                                  uint32_t nonce2, uint32_t nonce3) {
+    uint32_t s0[8], s1[8], s2[8], s3[8];
+    hash_nonce_arm_state(base, t0, t1, t2, nonce0, s0);
+    hash_nonce_arm_state(base, t0, t1, t2, nonce1, s1);
+    hash_nonce_arm_state(base, t0, t1, t2, nonce2, s2);
+    hash_nonce_arm_state(base, t0, t1, t2, nonce3, s3);
+    int cmp[4] = {0, 0, 0, 0};
+    const uint32_t *states[4] = {s0, s1, s2, s3};
+    for (int i = 7; i >= 0; --i) {
+        for (int lane = 0; lane < 4; ++lane) {
+            if (cmp[lane] != 0) continue;
+            uint32_t h = BSWAP32(states[lane][i]);
+            if (h < target_words[i]) cmp[lane] = 1;
+            else if (h > target_words[i]) cmp[lane] = -1;
+        }
+        if (cmp[0] && cmp[1] && cmp[2] && cmp[3]) break;
+    }
+    unsigned hits = 0;
+    for (int lane = 0; lane < 4; ++lane)
+        if (cmp[lane] >= 0) hits |= 1U << lane;
+    return hits;
+}
+#endif
+
 /* Compute two independent nonce hashes before comparing either target.
  * This exposes instruction-level parallelism to the compiler on ARM cores:
  * the two SHA256 pipelines have no data dependencies on each other. */
@@ -938,8 +969,40 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
         /* Keep the ARM crypto path inside the worker's prepared-job loop:
          * prefix words and target words are decoded once, not once per nonce. */
-        /* Two independent nonce pipelines per iteration. The scalar tail
-         * handles odd chunk sizes without reading past the assigned range. */
+#if defined(BTC_MINER_ARM64_QUAD)
+        /* Experimental four-nonce pipeline. */
+        for (; n + 3 < end; n += 4) {
+            unsigned hits = hash_nonce_arm_quad_words(&base, tail0, tail1, tail2,
+                target_words, (uint32_t)n, (uint32_t)(n + 1),
+                (uint32_t)(n + 2), (uint32_t)(n + 3));
+            local += 4;
+            if (hits) {
+                uint32_t found_nonce = (hits & 1U) ? (uint32_t)n :
+                    (hits & 2U) ? (uint32_t)(n + 1) :
+                    (hits & 4U) ? (uint32_t)(n + 2) : (uint32_t)(n + 3);
+                engine_lock(e);
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                    e->found_valid=1;
+                    e->found_nonce=found_nonce;
+                    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
+                }
+                engine_unlock(e);
+                __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                return;
+            }
+            if ((local & 0x3FFC)==0) {
+                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
+                if(stop) {
+                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                    return;
+                }
+            }
+        }
+#else
+        /* Two independent nonce pipelines per iteration. */
         for (; n + 1 < end; n += 2) {
             unsigned hits = hash_nonce_arm_pair_words(&base, tail0, tail1, tail2,
                                                        target_words, (uint32_t)n,
@@ -968,6 +1031,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 }
             }
         }
+#endif
         for (; n < end; ++n) {
             if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n)) {
                 engine_lock(e);
