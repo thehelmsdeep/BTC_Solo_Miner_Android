@@ -498,6 +498,40 @@ static inline int hash_nonce_arm_words(const SHA256_CTX *base,
     return 1;
 }
 
+/* Compute two independent nonce hashes before comparing either target.
+ * This exposes instruction-level parallelism to the compiler on ARM cores:
+ * the two SHA256 pipelines have no data dependencies on each other. */
+static inline uint8_t hash_nonce_arm_pair_words(const SHA256_CTX *base,
+                                                uint32_t t0, uint32_t t1, uint32_t t2,
+                                                const uint32_t target_words[8],
+                                                uint32_t nonce0, uint32_t nonce1) {
+    uint32_t state0[8], state1[8];
+    hash_nonce_arm_state(base, t0, t1, t2, nonce0, state0);
+    hash_nonce_arm_state(base, t0, t1, t2, nonce1, state1);
+
+    uint8_t hits = 0;
+    for (int i = 7; i >= 0; --i) {
+        uint32_t h0 = BSWAP32(state0[i]);
+        uint32_t h1 = BSWAP32(state1[i]);
+        uint32_t t = target_words[i];
+        if (!(hits & 1U)) {
+            if (h0 < t) hits |= 1U;
+            else if (h0 > t) hits |= 4U;
+        }
+        if (!(hits & 2U)) {
+            if (h1 < t) hits |= 2U;
+            else if (h1 > t) hits |= 8U;
+        }
+        if ((hits & 4U) && (hits & 8U)) return 0;
+        if ((hits & 1U) && (hits & 2U)) return 3U;
+        if ((hits & 1U) && (hits & 8U)) return 1U;
+        if ((hits & 4U) && (hits & 2U)) return 2U;
+    }
+    if (!(hits & 4U)) hits |= 1U;
+    if (!(hits & 8U)) hits |= 2U;
+    return hits & 3U;
+}
+
 static inline int hash_nonce_arm(const SHA256_CTX *base,
                                  uint32_t t0, uint32_t t1, uint32_t t2,
                                  const uint8_t target[32], uint32_t nonce) {
@@ -888,7 +922,35 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
         /* Keep the ARM crypto path inside the worker's prepared-job loop:
          * prefix words and target words are decoded once, not once per nonce. */
-        for (; n < end; ++n) {
+        for (; n + 1 < end; n += 2) {
+            uint8_t hits = hash_nonce_arm_pair_words(
+                &base, tail0, tail1, tail2, target_words,
+                (uint32_t)n, (uint32_t)(n + 1));
+            local += 2;
+            if (hits) {
+                uint32_t hit_nonce = (hits & 1U) ? (uint32_t)n : (uint32_t)(n + 1);
+                engine_lock(e);
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                    e->found_valid=1;
+                    e->found_nonce=hit_nonce;
+                    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
+                }
+                engine_unlock(e);
+                __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                return;
+            }
+            if ((local & 0x3FFF)==0) {
+                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
+                if(stop) {
+                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                    return;
+                }
+            }
+        }
+        if (n < end) {
             if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
@@ -901,16 +963,6 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 return;
             }
             ++local;
-            if ((local & 0x3FFF)==0) {
-                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
-                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
-                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
-                if(stop) {
-                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
-                    return;
-                }
-            }
         }
 #else
         for (; n < end; ++n) {
