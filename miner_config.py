@@ -28,7 +28,7 @@ class MinerConfig:
         self.upstream_port = _positive_int("STRATUM_PORT", 3333)
         self.worker_password = os.getenv("WORKER_PASSWORD", "x")
         self.cpu_threads = _positive_int(
-            "CPU_THREADS", max(1, os.cpu_count() or 1)
+            "CPU_THREADS", 8
         )
         self.nonce_batch = _positive_int("NONCE_BATCH", 4000000, 10000)
         self.report_interval = _positive_float("REPORT_INTERVAL", 5.0, 1.0)
