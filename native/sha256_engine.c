@@ -520,20 +520,7 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     hash_nonce_arm_state(base, t0, t1, t2, nonce0, s0);
     hash_nonce_arm_state(base, t0, t1, t2, nonce1, s1);
     unsigned hits = 0;
-#define ARM_PAIR_TARGET_CHECK(i) do { \
-        uint32_t h0 = BSWAP32(s0[i]); \
-        uint32_t h1 = BSWAP32(s1[i]); \
-        if (h0 < target_words[i]) hits |= 1U; \
-        else if (h0 > target_words[i]) hits &= ~1U; \
-        else { } \
-        if (h1 < target_words[i]) hits |= 2U; \
-        else if (h1 > target_words[i]) hits &= ~2U; \
-        else { } \
-    } while (0)
-    /* Keep a per-lane comparison state: -1 = still equal, 0 = above target,
-     * 1 = below target. Encode equal/below state in bits and stop comparing
-     * a lane after its first differing word. */
-#undef ARM_PAIR_TARGET_CHECK
+    /* -1 = above target, 0 = equal so far, 1 = below target. */
     int cmp0 = 0, cmp1 = 0;
     for (int i = 7; i >= 0; --i) {
         if (cmp0 == 0) {
