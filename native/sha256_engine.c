@@ -490,11 +490,23 @@ static inline int hash_nonce_arm_words(const SHA256_CTX *base,
 
     /* The worker decodes target_words once per job, so this hot path does
      * no target-byte loads, shifts, or digest materialization per nonce. */
-    for (int i = 7; i >= 0; --i) {
-        uint32_t hash_word = BSWAP32(state[i]);
-        if (hash_word < target_words[i]) return 1;
-        if (hash_word > target_words[i]) return 0;
-    }
+    /* Compare explicitly from the most-significant word.  Keeping this
+     * fixed-size lexicographic comparison avoids loop/index overhead in the
+     * per-nonce hot path while preserving Bitcoin's little-endian target rule. */
+#define ARM_TARGET_WORD_CHECK(i) do { \
+        uint32_t hash_word = BSWAP32(state[i]); \
+        if (hash_word < target_words[i]) return 1; \
+        if (hash_word > target_words[i]) return 0; \
+    } while (0)
+    ARM_TARGET_WORD_CHECK(7);
+    ARM_TARGET_WORD_CHECK(6);
+    ARM_TARGET_WORD_CHECK(5);
+    ARM_TARGET_WORD_CHECK(4);
+    ARM_TARGET_WORD_CHECK(3);
+    ARM_TARGET_WORD_CHECK(2);
+    ARM_TARGET_WORD_CHECK(1);
+    ARM_TARGET_WORD_CHECK(0);
+#undef ARM_TARGET_WORD_CHECK
     return 1;
 }
 
