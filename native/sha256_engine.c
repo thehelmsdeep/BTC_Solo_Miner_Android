@@ -462,17 +462,25 @@ static inline void hash_nonce_arm_state(const SHA256_CTX *base,
     memcpy(first, base->h, sizeof(first));
     arm_sha256_compress(first, b1);
 
-    uint32_t b2[16] = {
-        first[0], first[1], first[2], first[3],
-        first[4], first[5], first[6], first[7],
-        0x80000000U, 0, 0, 0, 0, 0, 0, 0x00000100U
-    };
+    /*
+     * Reuse the first-block state buffer as the second SHA-256 block.
+     * This avoids a separate 64-byte b2 stack array and its eight-word
+     * copy from first[]; first[0..7] already contains the required words.
+     */
+    first[8] = 0x80000000U;
+    first[9] = 0;
+    first[10] = 0;
+    first[11] = 0;
+    first[12] = 0;
+    first[13] = 0;
+    first[14] = 0;
+    first[15] = 0x00000100U;
     static const uint32_t IV[8] = {
         0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
         0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
     };
     memcpy(state, IV, sizeof(IV));
-    arm_sha256_compress(state, b2);
+    arm_sha256_compress(state, first);
 }
 
 static inline void hash_nonce_arm_digest(const SHA256_CTX *base,
