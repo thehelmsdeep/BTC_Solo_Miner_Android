@@ -1505,7 +1505,44 @@ int b_m_selftest(void) {
         hash_nonce_arm_digest(&base, t0, t1, t2, nonce, arm_digest);
         if (memcmp(arm_digest, expected_digest, 32) != 0) return 4;
         if (!hash_nonce_arm(&base, t0, t1, t2, target, nonce)) return 4;
+    }
+#endif
 
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2) && defined(BTC_MINER_ARM64_QUAD)
+    {
+        /* Exercise every quad lane against its own independently computed
+         * SHA256d digest, including the inclusive-target boundary. */
+        uint32_t ns[4] = {nonce, nonce + 1U, nonce + 2U, nonce + 3U};
+        uint32_t tw[8];
+        for (int lane = 0; lane < 4; ++lane) {
+            uint8_t digest[32], lower[32];
+            hash_nonce_arm_digest(&base, t0, t1, t2, ns[lane], digest);
+            for (int i = 0; i < 8; ++i)
+                tw[i] = (uint32_t)digest[i * 4] |
+                        ((uint32_t)digest[i * 4 + 1] << 8) |
+                        ((uint32_t)digest[i * 4 + 2] << 16) |
+                        ((uint32_t)digest[i * 4 + 3] << 24);
+            unsigned hits = hash_nonce_arm_quad_words(&base, t0, t1, t2,
+                tw, ns[0], ns[1], ns[2], ns[3]);
+            if (!(hits & (1U << lane))) return 5;
+
+            memcpy(lower, digest, sizeof(lower));
+            for (int j = 0; j < 32; ++j) {
+                if (lower[j] != 0) {
+                    --lower[j];
+                    break;
+                }
+                lower[j] = 0xff;
+            }
+            for (int i = 0; i < 8; ++i)
+                tw[i] = (uint32_t)lower[i * 4] |
+                        ((uint32_t)lower[i * 4 + 1] << 8) |
+                        ((uint32_t)lower[i * 4 + 2] << 16) |
+                        ((uint32_t)lower[i * 4 + 3] << 24);
+            hits = hash_nonce_arm_quad_words(&base, t0, t1, t2,
+                tw, ns[0], ns[1], ns[2], ns[3]);
+            if (hits & (1U << lane)) return 5;
+        }
     }
 #endif
 
