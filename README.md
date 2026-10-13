@@ -49,6 +49,16 @@ native/libb_m_sha256.so
 
 The program runs its SHA256 and native-engine self-tests before mining.
 
+
+### Native build behavior and troubleshooting
+
+- **A C compiler is required for the native engine.** On Termux, install one with `pkg install clang` (the setup command above includes it).
+- On the first run, `python main.py` attempts to compile `native/libb_m_sha256.so` automatically from the native source files. You do not need to build this library manually when compilation succeeds.
+- **Check the startup output.** A successful build prints a message similar to `Native SHA256 engine built with clang` or `Native SHA256 engine built with gcc`.
+- If the compiler is missing or compilation/loading fails, the miner may fall back to the Python SHA-256 implementation. Mining can still start in fallback mode, but the hashrate may be dramatically lower. Look for the `Native build unavailable`, compiler-unavailable, or Python fallback warning in the startup output; do not assume native acceleration is active just because mining started.
+- If native compilation fails, verify that `clang` is installed and review the complete error message before benchmarking performance.
+
+
 ## Configuration
 
 Environment variables:
