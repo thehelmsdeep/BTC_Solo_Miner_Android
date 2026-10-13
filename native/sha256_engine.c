@@ -1424,7 +1424,8 @@ int b_m_engine_selftest(void) {
 
 /* Built-in correctness self-test.
  * Return codes identify the failing optimized path:
- * 1 = SHA256d/fast path, 2 = SSE2 path, 3 = AVX2 path, 4 = ARM SHA2 path. */
+ * 1 = SHA256d/fast path, 2 = SSE2 path, 3 = AVX2 path, 4 = ARM SHA2 path,
+ * 5 = ARM64 four-nonce pipeline or its inclusive-target boundary test. */
 int b_m_selftest(void) {
     uint8_t prefix[76], target[32], header[80], d1[32], expected[32];
     const uint32_t nonce = 0x12345678U;
