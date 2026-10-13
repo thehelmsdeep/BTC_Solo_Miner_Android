@@ -548,33 +548,78 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     return hits;
 }
 
-/* Optional four-lane software pipeline for ARM64 crypto instructions.
- * Kept opt-in because register pressure differs across phone CPU cores. */
+/* Four-nonce staged pipeline for ARM64 SHA2.
+ *
+ * Unlike four serial hash_nonce_arm_state() calls, this batches the same
+ * stage across all lanes: prepare all first blocks, compress all first blocks,
+ * prepare all second-hash blocks, then compress all second blocks. The four
+ * independent compression chains are visible to the compiler at once, which
+ * gives its instruction scheduler a chance to overlap SHA2 operations while
+ * avoiding a hand-written 4x register-heavy round implementation.
+ *
+ * This remains opt-in until device benchmarks show a repeatable win. */
 #if defined(BTC_MINER_ARM64_QUAD)
 static inline unsigned hash_nonce_arm_quad_words(const SHA256_CTX *base,
                                                   uint32_t t0, uint32_t t1, uint32_t t2,
                                                   const uint32_t target_words[8],
                                                   uint32_t nonce0, uint32_t nonce1,
                                                   uint32_t nonce2, uint32_t nonce3) {
-    uint32_t s0[8], s1[8], s2[8], s3[8];
-    hash_nonce_arm_state(base, t0, t1, t2, nonce0, s0);
-    hash_nonce_arm_state(base, t0, t1, t2, nonce1, s1);
-    hash_nonce_arm_state(base, t0, t1, t2, nonce2, s2);
-    hash_nonce_arm_state(base, t0, t1, t2, nonce3, s3);
-    int cmp[4] = {0, 0, 0, 0};
-    const uint32_t *states[4] = {s0, s1, s2, s3};
-    for (int i = 7; i >= 0; --i) {
-        for (int lane = 0; lane < 4; ++lane) {
-            if (cmp[lane] != 0) continue;
-            uint32_t h = BSWAP32(states[lane][i]);
-            if (h < target_words[i]) cmp[lane] = 1;
-            else if (h > target_words[i]) cmp[lane] = -1;
-        }
-        if (cmp[0] && cmp[1] && cmp[2] && cmp[3]) break;
+    const uint32_t nonces[4] = {nonce0, nonce1, nonce2, nonce3};
+    uint32_t first_blocks[4][16];
+    uint32_t second_blocks[4][16];
+    uint32_t states[4][8];
+    static const uint32_t IV[8] = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
+        0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
+    };
+
+    /* Stage 1: prepare all four first-hash blocks and initial states. */
+    for (int lane = 0; lane < 4; ++lane) {
+        uint32_t *w = first_blocks[lane];
+        w[0] = t0;
+        w[1] = t1;
+        w[2] = t2;
+        w[3] = BSWAP32(nonces[lane]);
+        w[4] = 0x80000000U;
+        for (int i = 5; i < 15; ++i) w[i] = 0;
+        w[15] = 0x00000280U;
+        memcpy(states[lane], base->h, sizeof(states[lane]));
     }
-    unsigned hits = 0;
+
+    /* Stage 2: run four independent first SHA-256 compressions. */
     for (int lane = 0; lane < 4; ++lane)
-        if (cmp[lane] >= 0) hits |= 1U << lane;
+        arm_sha256_compress(states[lane], first_blocks[lane]);
+
+    /* Stage 3: build all second-hash blocks before reusing the state arrays. */
+    for (int lane = 0; lane < 4; ++lane) {
+        memcpy(second_blocks[lane], states[lane], 8 * sizeof(uint32_t));
+        second_blocks[lane][8] = 0x80000000U;
+        for (int i = 9; i < 15; ++i) second_blocks[lane][i] = 0;
+        second_blocks[lane][15] = 0x00000100U;
+        memcpy(states[lane], IV, sizeof(IV));
+    }
+
+    /* Stage 4: run four independent second SHA-256 compressions. */
+    for (int lane = 0; lane < 4; ++lane)
+        arm_sha256_compress(states[lane], second_blocks[lane]);
+
+    /* Bitcoin compares the digest as a little-endian integer. */
+    unsigned hits = 0;
+    for (int lane = 0; lane < 4; ++lane) {
+        int cmp = 0;
+        for (int i = 7; i >= 0; --i) {
+            uint32_t h = BSWAP32(states[lane][i]);
+            if (h < target_words[i]) {
+                cmp = 1;
+                break;
+            }
+            if (h > target_words[i]) {
+                cmp = -1;
+                break;
+            }
+        }
+        if (cmp >= 0) hits |= 1U << lane;
+    }
     return hits;
 }
 #endif
