@@ -202,8 +202,10 @@ def ensure_native():
         source_files.append(asm_file)
         flags = [*flags, "-DBTC_MINER_ARM64_ASM"]
 
-    # Experimental four-nonce software pipeline; opt in only for benchmarks.
-    quad_setting = os.getenv("BTC_MINER_ARM64_QUAD", "0").strip().lower()
+    # Enable the staged four-nonce SHA2 pipeline by default on ARM64.
+    # Set BTC_MINER_ARM64_QUAD=0 to disable it for device comparisons.
+    # The native correctness self-test runs before the engine is used.
+    quad_setting = os.getenv("BTC_MINER_ARM64_QUAD", "1").strip().lower()
     if (
         os.name != "nt"
         and machine in ("aarch64", "arm64")
