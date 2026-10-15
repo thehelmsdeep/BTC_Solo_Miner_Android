@@ -204,9 +204,8 @@ static inline void sha256_compress4(__m128i h[8],const __m128i in[16]) {
 }
 
 static inline int le_target_lane(const uint32_t hv[8][4],int lane,const uint32_t target_words[8]){
-    /* Compare directly from the most-significant Bitcoin word. The digest
-     * words are already in registers after the SIMD compression; only the
-     * selected lane needs byte swapping. */
+    /* Compare big-endian digest state words directly. Target words are
+     * byte-swapped once per job, keeping BSWAP out of the per-lane hot path. */
     for(int i=7;i>=0;i--){
         uint32_t hvv=hv[i][lane];
         uint32_t tv=target_words[i];
@@ -1269,7 +1268,8 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
     if (!e || !prefix || !target) return 0;
 
     /* Prepare all job-invariant SHA-256 inputs once, not once per worker.
-     * The 64-byte header prefix is the reusable first-block midstate. */
+     * The 64-byte header prefix is the reusable first-block midstate. Target
+     * words are stored in big-endian comparison order to avoid per-hash swaps. */
     SHA256_CTX prepared_midstate;
     init(&prepared_midstate);
     update(&prepared_midstate, prefix, 64);
