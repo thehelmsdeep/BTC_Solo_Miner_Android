@@ -1058,7 +1058,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
                 return;
             }
-            if ((local & 0x3FFC)==0) {
+            if ((local & 0xFFFC)==0) {
                 int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
                          __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
                          !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
