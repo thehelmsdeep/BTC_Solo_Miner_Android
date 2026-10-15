@@ -208,7 +208,7 @@ static inline int le_target_lane(const uint32_t hv[8][4],int lane,const uint32_t
      * words are already in registers after the SIMD compression; only the
      * selected lane needs byte swapping. */
     for(int i=7;i>=0;i--){
-        uint32_t hvv=BSWAP32(hv[i][lane]);
+        uint32_t hvv=hv[i][lane];
         uint32_t tv=target_words[i];
         if(hvv!=tv) return hvv<tv;
     }
@@ -286,7 +286,7 @@ static inline void sha256_compress8(__m256i h[8],const __m256i in[16]){
 
 static inline int le_target_lane8(const uint32_t hv[8][8],int lane,const uint32_t target_words[8]){
     for(int i=7;i>=0;i--){
-        uint32_t hvv=BSWAP32(hv[i][lane]),tv=target_words[i];
+        uint32_t hvv=hv[i][lane],tv=target_words[i];
         if(hvv!=tv) return hvv<tv;
     }
     return 1;
@@ -509,7 +509,7 @@ static inline int hash_nonce_arm_words(const SHA256_CTX *base,
      * fixed-size lexicographic comparison avoids loop/index overhead in the
      * per-nonce hot path while preserving Bitcoin's little-endian target rule. */
 #define ARM_TARGET_WORD_CHECK(i) do { \
-        uint32_t hash_word = BSWAP32(state[i]); \
+        uint32_t hash_word = state[i]; \
         if (hash_word < target_words[i]) return 1; \
         if (hash_word > target_words[i]) return 0; \
     } while (0)
@@ -539,12 +539,12 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     int cmp0 = 0, cmp1 = 0;
     for (int i = 7; i >= 0; --i) {
         if (cmp0 == 0) {
-            uint32_t h = BSWAP32(s0[i]);
+            uint32_t h = s0[i];
             if (h < target_words[i]) cmp0 = 1;
             else if (h > target_words[i]) cmp0 = -1;
         }
         if (cmp1 == 0) {
-            uint32_t h = BSWAP32(s1[i]);
+            uint32_t h = s1[i];
             if (h < target_words[i]) cmp1 = 1;
             else if (h > target_words[i]) cmp1 = -1;
         }
@@ -561,7 +561,7 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
 static inline int arm_state_meets_target_words(const uint32_t state[8],
                                                 const uint32_t target_words[8]) {
 #define ARM_STATE_TARGET_CHECK(i) do { \
-    uint32_t hash_word = BSWAP32(state[i]); \
+    uint32_t hash_word = state[i]; \
     if (hash_word < target_words[i]) return 1; \
     if (hash_word > target_words[i]) return 0; \
 } while (0)
@@ -657,10 +657,10 @@ static inline int hash_nonce_arm(const SHA256_CTX *base,
                                  const uint8_t target[32], uint32_t nonce) {
     uint32_t target_words[8];
     for (int i = 0; i < 8; ++i) {
-        target_words[i] = (uint32_t)target[i * 4]
-                        | ((uint32_t)target[i * 4 + 1] << 8)
-                        | ((uint32_t)target[i * 4 + 2] << 16)
-                        | ((uint32_t)target[i * 4 + 3] << 24);
+        target_words[i] = BSWAP32((uint32_t)target[i * 4]
+                                  | ((uint32_t)target[i * 4 + 1] << 8)
+                                  | ((uint32_t)target[i * 4 + 2] << 16)
+                                  | ((uint32_t)target[i * 4 + 3] << 24));
     }
     return hash_nonce_arm_words(base, t0, t1, t2, target_words, nonce);
 }
@@ -1287,10 +1287,10 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
 
     uint32_t prepared_target_words[8];
     for (int i = 0; i < 8; ++i) {
-        prepared_target_words[i] = (uint32_t)target[i*4] |
-                                   ((uint32_t)target[i*4+1] << 8) |
-                                   ((uint32_t)target[i*4+2] << 16) |
-                                   ((uint32_t)target[i*4+3] << 24);
+        prepared_target_words[i] = BSWAP32((uint32_t)target[i*4] |
+                                             ((uint32_t)target[i*4+1] << 8) |
+                                             ((uint32_t)target[i*4+2] << 16) |
+                                             ((uint32_t)target[i*4+3] << 24));
     }
 
     engine_lock(e);
