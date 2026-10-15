@@ -554,6 +554,63 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     return hits;
 }
 
+/* Eight-nonce staged pipeline for ARM64 SHA2.
+ * Process eight independent SHA256d candidates in one batch to expose more
+ * independent crypto-instruction chains to the CPU scheduler. */
+#if defined(BTC_MINER_ARM64_OCTO)
+static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
+                                                  uint32_t t0, uint32_t t1, uint32_t t2,
+                                                  const uint32_t target_words[8],
+                                                  uint32_t nonce0, uint32_t nonce1,
+                                                  uint32_t nonce2, uint32_t nonce3,
+                                                  uint32_t nonce4, uint32_t nonce5,
+                                                  uint32_t nonce6, uint32_t nonce7) {
+    const uint32_t nonces[8] = {nonce0, nonce1, nonce2, nonce3,
+                                nonce4, nonce5, nonce6, nonce7};
+    uint32_t first_blocks[8][16];
+    uint32_t second_blocks[8][16];
+    uint32_t states[8][8];
+    static const uint32_t IV[8] = {
+        0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
+        0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
+    };
+
+    #pragma GCC unroll 8
+    for (int lane = 0; lane < 8; ++lane) {
+        uint32_t *w = first_blocks[lane];
+        w[0] = t0; w[1] = t1; w[2] = t2;
+        w[3] = BSWAP32(nonces[lane]);
+        w[4] = 0x80000000U;
+        for (int i = 5; i < 15; ++i) w[i] = 0;
+        w[15] = 0x00000280U;
+        memcpy(states[lane], base->h, sizeof(states[lane]));
+    }
+
+    #pragma GCC unroll 8
+    for (int lane = 0; lane < 8; ++lane)
+        arm_sha256_compress(states[lane], first_blocks[lane]);
+
+    #pragma GCC unroll 8
+    for (int lane = 0; lane < 8; ++lane) {
+        memcpy(second_blocks[lane], states[lane], 8 * sizeof(uint32_t));
+        second_blocks[lane][8] = 0x80000000U;
+        for (int i = 9; i < 15; ++i) second_blocks[lane][i] = 0;
+        second_blocks[lane][15] = 0x00000100U;
+        memcpy(states[lane], IV, sizeof(IV));
+    }
+
+    #pragma GCC unroll 8
+    for (int lane = 0; lane < 8; ++lane)
+        arm_sha256_compress(states[lane], second_blocks[lane]);
+
+    unsigned hits = 0;
+    for (int lane = 0; lane < 8; ++lane)
+        if (arm_state_meets_target_words(states[lane], target_words))
+            hits |= 1U << lane;
+    return hits;
+}
+#endif
+
 /* Compare a SHA-256 state against the decoded Bitcoin target without
  * a loop counter or per-word loop branch in the four-lane hot path.
  * Equality is accepted, matching the inclusive proof-of-work target rule. */
@@ -1037,8 +1094,44 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
         /* Keep the ARM crypto path inside the worker's prepared-job loop:
          * prefix words and target words are decoded once, not once per nonce. */
-#if defined(BTC_MINER_ARM64_QUAD)
-        /* Experimental four-nonce pipeline. */
+#if defined(BTC_MINER_ARM64_OCTO)
+        for (; n + 7 < end; n += 8) {
+            unsigned hits = hash_nonce_arm_octo_words(&base, tail0, tail1, tail2,
+                target_words, (uint32_t)n, (uint32_t)(n + 1), (uint32_t)(n + 2),
+                (uint32_t)(n + 3), (uint32_t)(n + 4), (uint32_t)(n + 5),
+                (uint32_t)(n + 6), (uint32_t)(n + 7));
+            local += 8;
+            if (hits) {
+                uint32_t found_nonce = (hits & 1U) ? (uint32_t)n :
+                    (hits & 2U) ? (uint32_t)(n + 1) :
+                    (hits & 4U) ? (uint32_t)(n + 2) :
+                    (hits & 8U) ? (uint32_t)(n + 3) :
+                    (hits & 16U) ? (uint32_t)(n + 4) :
+                    (hits & 32U) ? (uint32_t)(n + 5) :
+                    (hits & 64U) ? (uint32_t)(n + 6) : (uint32_t)(n + 7);
+                engine_lock(e);
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                    e->found_valid=1;
+                    e->found_nonce=found_nonce;
+                    __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
+                }
+                engine_unlock(e);
+                __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                return;
+            }
+            if ((local & 0xFFF8)==0) {
+                int stop=__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+                         !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+                         __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation;
+                if(stop) {
+                    if(local) __atomic_fetch_add(&e->total_hashes,local,__ATOMIC_RELAXED);
+                    return;
+                }
+            }
+        }
+#elif defined(BTC_MINER_ARM64_QUAD)
+        /* Four independent SHA256d candidates are staged together. */
         for (; n + 3 < end; n += 4) {
             unsigned hits = hash_nonce_arm_quad_words(&base, tail0, tail1, tail2,
                 target_words, (uint32_t)n, (uint32_t)(n + 1),
