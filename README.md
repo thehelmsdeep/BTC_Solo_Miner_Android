@@ -73,6 +73,9 @@ Environment variables:
 - `RECONNECT_DELAY`
 - `SUBMIT_TIMEOUT`
 - `BM_NATIVE`
+- `BTC_MINER_ARM64_QUAD` (defaults to enabled on ARM64; set to `0` to compare/disable)
+- `BTC_MINER_ARM64_ASM` (optional hand-written assembly experiment)
+- `BTC_MINER_CPU_TUNE` (optional compiler tuning; `native` may be device/compiler-specific)
 
 Example:
 
