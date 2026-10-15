@@ -555,6 +555,28 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     return hits;
 }
 
+/* Compare a SHA-256 state against the decoded Bitcoin target without
+ * a loop counter or per-word loop branch in the four-lane hot path.
+ * Equality is accepted, matching the inclusive proof-of-work target rule. */
+static inline int arm_state_meets_target_words(const uint32_t state[8],
+                                                const uint32_t target_words[8]) {
+#define ARM_STATE_TARGET_CHECK(i) do { \
+    uint32_t hash_word = BSWAP32(state[i]); \
+    if (hash_word < target_words[i]) return 1; \
+    if (hash_word > target_words[i]) return 0; \
+} while (0)
+    ARM_STATE_TARGET_CHECK(7);
+    ARM_STATE_TARGET_CHECK(6);
+    ARM_STATE_TARGET_CHECK(5);
+    ARM_STATE_TARGET_CHECK(4);
+    ARM_STATE_TARGET_CHECK(3);
+    ARM_STATE_TARGET_CHECK(2);
+    ARM_STATE_TARGET_CHECK(1);
+    ARM_STATE_TARGET_CHECK(0);
+#undef ARM_STATE_TARGET_CHECK
+    return 1;
+}
+
 /* Four-nonce staged pipeline for ARM64 SHA2.
  *
  * Unlike four serial hash_nonce_arm_state() calls, this batches the same
@@ -619,19 +641,8 @@ static inline unsigned hash_nonce_arm_quad_words(const SHA256_CTX *base,
     /* Bitcoin compares the digest as a little-endian integer. */
     unsigned hits = 0;
     for (int lane = 0; lane < 4; ++lane) {
-        int cmp = 0;
-        for (int i = 7; i >= 0; --i) {
-            uint32_t h = BSWAP32(states[lane][i]);
-            if (h < target_words[i]) {
-                cmp = 1;
-                break;
-            }
-            if (h > target_words[i]) {
-                cmp = -1;
-                break;
-            }
-        }
-        if (cmp >= 0) hits |= 1U << lane;
+        if (arm_state_meets_target_words(states[lane], target_words))
+            hits |= 1U << lane;
     }
     return hits;
 }
