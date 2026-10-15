@@ -75,7 +75,7 @@ Environment variables:
 - `BM_NATIVE`
 - `BTC_MINER_ARM64_QUAD` (defaults to enabled on ARM64; set to `0` to compare/disable)
 - `BTC_MINER_ARM64_ASM` (optional hand-written assembly experiment)
-- `BTC_MINER_CPU_TUNE` (optional compiler tuning; `native` may be device/compiler-specific)
+- `BTC_MINER_CPU_TUNE` (defaults to `native` for on-device tuning; set to `generic` for a more portable ARMv8+crypto build. Native tuning depends on the local compiler/CPU.)
 
 Example:
 
