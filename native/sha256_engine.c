@@ -554,10 +554,13 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     return hits;
 }
 
+/* Forward declaration: the fixed-word target comparator is defined below. */
+static inline int arm_state_meets_target_words(const uint32_t state[8], const uint32_t target_words[8]);
+
 /* Eight-nonce staged pipeline for ARM64 SHA2.
  * Process eight independent SHA256d candidates in one batch to expose more
  * independent crypto-instruction chains to the CPU scheduler. */
-#if defined(BTC_MINER_ARM64_OCTO)
+#if defined(BTC_MINER_ARM64_OCTO) || defined(BTC_MINER_ARM64_QUAD)
 static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
                                                   uint32_t t0, uint32_t t1, uint32_t t2,
                                                   const uint32_t target_words[8],
@@ -1094,7 +1097,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
         /* Keep the ARM crypto path inside the worker's prepared-job loop:
          * prefix words and target words are decoded once, not once per nonce. */
-#if defined(BTC_MINER_ARM64_OCTO)
+#if defined(BTC_MINER_ARM64_OCTO) || defined(BTC_MINER_ARM64_QUAD)
         for (; n + 7 < end; n += 8) {
             unsigned hits = hash_nonce_arm_octo_words(&base, tail0, tail1, tail2,
                 target_words, (uint32_t)n, (uint32_t)(n + 1), (uint32_t)(n + 2),
