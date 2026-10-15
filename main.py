@@ -154,8 +154,8 @@ def ensure_native():
     source_file = NATIVE_DIR / "sha256_engine.c"
     build_stamp = NATIVE_LIB.with_suffix(NATIVE_LIB.suffix + ".build-config")
 
-    # Allow controlled compiler/CPU-tuning experiments without editing source.
-    # Defaults preserve the existing GCC-first, generic ARM crypto build.
+    # Tune the native engine for this device by default; set BTC_MINER_CPU_TUNE=generic
+    # to build a more portable ARMv8+crypto binary for cross-device use.
     requested_cc = os.getenv("BTC_MINER_CC", "auto").strip()
     if requested_cc.lower() == "auto":
         compiler = shutil.which("gcc") or shutil.which("clang") or shutil.which("cc")
@@ -165,7 +165,7 @@ def ensure_native():
         print(Fore.YELLOW, f"[!] C compiler {requested_cc!r} unavailable; using Python SHA256 fallback")
         return None
 
-    cpu_tune = os.getenv("BTC_MINER_CPU_TUNE", "generic").strip().lower()
+    cpu_tune = os.getenv("BTC_MINER_CPU_TUNE", "native").strip().lower()
     if cpu_tune not in ("generic", "native"):
         print(Fore.YELLOW, "[!] BTC_MINER_CPU_TUNE must be 'generic' or 'native'; using generic")
         cpu_tune = "generic"
@@ -177,7 +177,7 @@ def ensure_native():
     else:
         machine = platform.machine().lower()
         if cpu_tune == "native":
-            # Opt-in only: let the local compiler select this phone's CPU features.
+            # Use the local phone CPU features; generic mode remains available by environment override.
             cpu_flags = ["-mcpu=native"]
         else:
             march = "armv8-a+crypto" if machine in ("aarch64", "arm64") else "native"
