@@ -580,7 +580,10 @@ static inline unsigned hash_nonce_arm_quad_words(const SHA256_CTX *base,
         0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
     };
 
-    /* Stage 1: prepare all four first-hash blocks and initial states. */
+    /* Stage 1: prepare all four first-hash blocks and initial states.
+     * Unroll fixed four-lane loops to remove loop control and help the
+     * compiler schedule independent lane work more aggressively. */
+    #pragma GCC unroll 4
     for (int lane = 0; lane < 4; ++lane) {
         uint32_t *w = first_blocks[lane];
         w[0] = t0;
@@ -593,11 +596,13 @@ static inline unsigned hash_nonce_arm_quad_words(const SHA256_CTX *base,
         memcpy(states[lane], base->h, sizeof(states[lane]));
     }
 
-    /* Stage 2: run four independent first SHA-256 compressions. */
+    /* Stage 2: expose the independent compression calls to the scheduler. */
+    #pragma GCC unroll 4
     for (int lane = 0; lane < 4; ++lane)
         arm_sha256_compress(states[lane], first_blocks[lane]);
 
     /* Stage 3: build all second-hash blocks before reusing the state arrays. */
+    #pragma GCC unroll 4
     for (int lane = 0; lane < 4; ++lane) {
         memcpy(second_blocks[lane], states[lane], 8 * sizeof(uint32_t));
         second_blocks[lane][8] = 0x80000000U;
@@ -607,6 +612,7 @@ static inline unsigned hash_nonce_arm_quad_words(const SHA256_CTX *base,
     }
 
     /* Stage 4: run four independent second SHA-256 compressions. */
+    #pragma GCC unroll 4
     for (int lane = 0; lane < 4; ++lane)
         arm_sha256_compress(states[lane], second_blocks[lane]);
 
