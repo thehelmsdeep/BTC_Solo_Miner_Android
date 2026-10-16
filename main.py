@@ -82,6 +82,10 @@ def render_dashboard(rate, interval_hashes=None):
     print("Rejected     : %d" % ctx.shares_rejected)
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
+    snapshot = structured_logger.dashboard_snapshot()
+    print("Bug Count    : %d" % snapshot["error_count"])
+    print("Last Bug     : %s" % snapshot["last_error"])
+    print("Mining Time  : %s" % snapshot["mining_duration"])
     print("Debug Log    : miner-debug.log")
     print("Event Log    : %s" % structured_logger.event_path)
     structured_logger.log_mining_status(
