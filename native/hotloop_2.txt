@@ -1,0 +1,327 @@
+
+native/libb_m_sha256.so:	file format elf64-littleaarch64
+
+Disassembly of section .text:
+
+0000000000007600 <engine_thread>:
+    8200: aa1f03f4     	mov	x20, xzr
+    8204: aa0003f5     	mov	x21, x0
+    8208: ad475bf9     	ldp	q25, q22, [sp, #0xe0]
+    820c: ad44d3e8     	ldp	q8, q20, [sp, #0x90]
+    8210: 6f00e418     	movi	v24.2d, #0000000000000000
+    8214: ad43bfed     	ldp	q13, q15, [sp, #0x70]
+    8218: ad466bfd     	ldp	q29, q26, [sp, #0xc0]
+    821c: 3dc06ffe     	ldr	q30, [sp, #0x1b0]
+    8220: ad42bbe9     	ldp	q9, q14, [sp, #0x50]
+    8224: ad41abeb     	ldp	q11, q10, [sp, #0x30]
+    8228: 3dc00bf5     	ldr	q21, [sp, #0x20]
+    822c: 3dc02ffc     	ldr	q28, [sp, #0xb0]
+    8230: eb0802bf     	cmp	x21, x8
+    8234: 54001e42     	b.hs	0x85fc <engine_thread+0xffc>
+    8238: 8b140109     	add	x9, x8, x20
+    823c: cb150129     	sub	x9, x9, x21
+    8240: 14000005     	b	0x8254 <engine_thread+0xc54>
+    8244: 91000694     	add	x20, x20, #0x1
+    8248: 910006b5     	add	x21, x21, #0x1
+    824c: eb15011f     	cmp	x8, x21
+    8250: 54001d40     	b.eq	0x85f8 <engine_thread+0xff8>
+    8254: 5ac00aaa     	rev	w10, w21
+    8258: ad4ccfe1     	ldp	q1, q19, [sp, #0x190]
+    825c: 4e1c1d41     	mov	v1.s[3], w10
+    8260: 4eb68422     	add	v2.4s, v1.4s, v22.4s
+    8264: 3dc073f2     	ldr	q18, [sp, #0x1c0]
+    8268: 4eb21e43     	mov	v3.16b, v18.16b
+    826c: 5e024263     	sha256h	q3, q19, v2.4s
+    8270: 4eb31e60     	mov	v0.16b, v19.16b
+    8274: 5e025240     	sha256h2	q0, q18, v2.4s
+    8278: 5e282a81     	sha256su0	v1.4s, v20.4s
+    827c: 5e086301     	sha256su1	v1.4s, v24.4s, v8.4s
+    8280: 4ea31c62     	mov	v2.16b, v3.16b
+    8284: 5e194002     	sha256h	q2, q0, v25.4s
+    8288: 5e195060     	sha256h2	q0, q3, v25.4s
+    828c: ad4b93e3     	ldp	q3, q4, [sp, #0x170]
+    8290: 5e016103     	sha256su1	v3.4s, v8.4s, v1.4s
+    8294: 4ea21c45     	mov	v5.16b, v2.16b
+    8298: 5e1a4005     	sha256h	q5, q0, v26.4s
+    829c: 5e1a5040     	sha256h2	q0, q2, v26.4s
+    82a0: 5e036024     	sha256su1	v4.4s, v1.4s, v3.4s
+    82a4: 4ea81d02     	mov	v2.16b, v8.16b
+    82a8: 4ea51ca6     	mov	v6.16b, v5.16b
+    82ac: 5e1d4006     	sha256h	q6, q0, v29.4s
+    82b0: 5e282822     	sha256su0	v2.4s, v1.4s
+    82b4: 5e1d50a0     	sha256h2	q0, q5, v29.4s
+    82b8: 5e046062     	sha256su1	v2.4s, v3.4s, v4.4s
+    82bc: 4ebe8425     	add	v5.4s, v1.4s, v30.4s
+    82c0: 4ea61cc7     	mov	v7.16b, v6.16b
+    82c4: 5e054007     	sha256h	q7, q0, v5.4s
+    82c8: 5e282861     	sha256su0	v1.4s, v3.4s
+    82cc: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    82d0: 5e026081     	sha256su1	v1.4s, v4.4s, v2.4s
+    82d4: 4ead8465     	add	v5.4s, v3.4s, v13.4s
+    82d8: 4ea71ce6     	mov	v6.16b, v7.16b
+    82dc: 5e054006     	sha256h	q6, q0, v5.4s
+    82e0: 5e282883     	sha256su0	v3.4s, v4.4s
+    82e4: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    82e8: 5e016043     	sha256su1	v3.4s, v2.4s, v1.4s
+    82ec: 4eae8485     	add	v5.4s, v4.4s, v14.4s
+    82f0: 4ea61cc7     	mov	v7.16b, v6.16b
+    82f4: 5e054007     	sha256h	q7, q0, v5.4s
+    82f8: 5e282844     	sha256su0	v4.4s, v2.4s
+    82fc: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    8300: 5e036024     	sha256su1	v4.4s, v1.4s, v3.4s
+    8304: 4ea98445     	add	v5.4s, v2.4s, v9.4s
+    8308: 4ea71ce6     	mov	v6.16b, v7.16b
+    830c: 5e054006     	sha256h	q6, q0, v5.4s
+    8310: 5e282822     	sha256su0	v2.4s, v1.4s
+    8314: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    8318: 5e046062     	sha256su1	v2.4s, v3.4s, v4.4s
+    831c: 4eaa8425     	add	v5.4s, v1.4s, v10.4s
+    8320: 4ea61cc7     	mov	v7.16b, v6.16b
+    8324: 5e054007     	sha256h	q7, q0, v5.4s
+    8328: 5e282861     	sha256su0	v1.4s, v3.4s
+    832c: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    8330: 5e026081     	sha256su1	v1.4s, v4.4s, v2.4s
+    8334: 4eab8465     	add	v5.4s, v3.4s, v11.4s
+    8338: 4ea71ce6     	mov	v6.16b, v7.16b
+    833c: 5e054006     	sha256h	q6, q0, v5.4s
+    8340: 5e282883     	sha256su0	v3.4s, v4.4s
+    8344: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    8348: 5e016043     	sha256su1	v3.4s, v2.4s, v1.4s
+    834c: 4eb58485     	add	v5.4s, v4.4s, v21.4s
+    8350: 4ea61cc7     	mov	v7.16b, v6.16b
+    8354: 5e054007     	sha256h	q7, q0, v5.4s
+    8358: 5e282844     	sha256su0	v4.4s, v2.4s
+    835c: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    8360: 5e036024     	sha256su1	v4.4s, v1.4s, v3.4s
+    8364: ad4adffb     	ldp	q27, q23, [sp, #0x150]
+    8368: 4eb78445     	add	v5.4s, v2.4s, v23.4s
+    836c: 4ea71ce6     	mov	v6.16b, v7.16b
+    8370: 5e054006     	sha256h	q6, q0, v5.4s
+    8374: 5e282822     	sha256su0	v2.4s, v1.4s
+    8378: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    837c: 5e046062     	sha256su1	v2.4s, v3.4s, v4.4s
+    8380: 4ebb8421     	add	v1.4s, v1.4s, v27.4s
+    8384: 4ea61cc5     	mov	v5.16b, v6.16b
+    8388: 5e014005     	sha256h	q5, q0, v1.4s
+    838c: 5e0150c0     	sha256h2	q0, q6, v1.4s
+    8390: ad49b3f0     	ldp	q16, q12, [sp, #0x130]
+    8394: 4eac8461     	add	v1.4s, v3.4s, v12.4s
+    8398: 4ea51ca3     	mov	v3.16b, v5.16b
+    839c: 5e014003     	sha256h	q3, q0, v1.4s
+    83a0: 5e0150a0     	sha256h2	q0, q5, v1.4s
+    83a4: 4eb08481     	add	v1.4s, v4.4s, v16.4s
+    83a8: 4ea31c64     	mov	v4.16b, v3.16b
+    83ac: 5e014004     	sha256h	q4, q0, v1.4s
+    83b0: 5e015060     	sha256h2	q0, q3, v1.4s
+    83b4: 3dc07bf1     	ldr	q17, [sp, #0x1e0]
+    83b8: 4eb18441     	add	v1.4s, v2.4s, v17.4s
+    83bc: 4ea41c83     	mov	v3.16b, v4.16b
+    83c0: 5e014003     	sha256h	q3, q0, v1.4s
+    83c4: 5e015080     	sha256h2	q0, q4, v1.4s
+    83c8: 4eb28461     	add	v1.4s, v3.4s, v18.4s
+    83cc: 4eb38402     	add	v2.4s, v0.4s, v19.4s
+    83d0: 3dc083e0     	ldr	q0, [sp, #0x200]
+    83d4: 4ea08463     	add	v3.4s, v3.4s, v0.4s
+    83d8: 5e282841     	sha256su0	v1.4s, v2.4s
+    83dc: 4ebc1f84     	mov	v4.16b, v28.16b
+    83e0: 3dc04bf2     	ldr	q18, [sp, #0x120]
+    83e4: 5e034244     	sha256h	q4, q18, v3.4s
+    83e8: 4eb21e40     	mov	v0.16b, v18.16b
+    83ec: 5e035380     	sha256h2	q0, q28, v3.4s
+    83f0: 5e0f6281     	sha256su1	v1.4s, v20.4s, v15.4s
+    83f4: 3dc077e3     	ldr	q3, [sp, #0x1d0]
+    83f8: 4ea38443     	add	v3.4s, v2.4s, v3.4s
+    83fc: 4ea41c85     	mov	v5.16b, v4.16b
+    8400: 5e034005     	sha256h	q5, q0, v3.4s
+    8404: 5e035080     	sha256h2	q0, q4, v3.4s
+    8408: 5e282a82     	sha256su0	v2.4s, v20.4s
+    840c: 5e0161e2     	sha256su1	v2.4s, v15.4s, v1.4s
+    8410: 4ea51ca6     	mov	v6.16b, v5.16b
+    8414: ad480fe7     	ldp	q7, q3, [sp, #0x100]
+    8418: 5e034006     	sha256h	q6, q0, v3.4s
+    841c: 5e0350a0     	sha256h2	q0, q5, v3.4s
+    8420: 3dc07fe4     	ldr	q4, [sp, #0x1f0]
+    8424: 5e026024     	sha256su1	v4.4s, v1.4s, v2.4s
+    8428: 4eaf1de3     	mov	v3.16b, v15.16b
+    842c: 4ea61cc5     	mov	v5.16b, v6.16b
+    8430: 5e074005     	sha256h	q5, q0, v7.4s
+    8434: 5e282823     	sha256su0	v3.4s, v1.4s
+    8438: 5e0750c0     	sha256h2	q0, q6, v7.4s
+    843c: 5e046043     	sha256su1	v3.4s, v2.4s, v4.4s
+    8440: 4ebe8426     	add	v6.4s, v1.4s, v30.4s
+    8444: 4ea51ca7     	mov	v7.16b, v5.16b
+    8448: 5e064007     	sha256h	q7, q0, v6.4s
+    844c: 5e282841     	sha256su0	v1.4s, v2.4s
+    8450: 5e0650a0     	sha256h2	q0, q5, v6.4s
+    8454: 5e036081     	sha256su1	v1.4s, v4.4s, v3.4s
+    8458: 4ead8445     	add	v5.4s, v2.4s, v13.4s
+    845c: 4ea71ce6     	mov	v6.16b, v7.16b
+    8460: 5e054006     	sha256h	q6, q0, v5.4s
+    8464: 5e282882     	sha256su0	v2.4s, v4.4s
+    8468: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    846c: 5e016062     	sha256su1	v2.4s, v3.4s, v1.4s
+    8470: 4eae8485     	add	v5.4s, v4.4s, v14.4s
+    8474: 4ea61cc7     	mov	v7.16b, v6.16b
+    8478: 5e054007     	sha256h	q7, q0, v5.4s
+    847c: 5e282864     	sha256su0	v4.4s, v3.4s
+    8480: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    8484: 5e026024     	sha256su1	v4.4s, v1.4s, v2.4s
+    8488: 4ea98465     	add	v5.4s, v3.4s, v9.4s
+    848c: 4ea71ce6     	mov	v6.16b, v7.16b
+    8490: 5e054006     	sha256h	q6, q0, v5.4s
+    8494: 5e282823     	sha256su0	v3.4s, v1.4s
+    8498: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    849c: 5e046043     	sha256su1	v3.4s, v2.4s, v4.4s
+    84a0: 4eaa8425     	add	v5.4s, v1.4s, v10.4s
+    84a4: 4ea61cc7     	mov	v7.16b, v6.16b
+    84a8: 5e054007     	sha256h	q7, q0, v5.4s
+    84ac: 5e282841     	sha256su0	v1.4s, v2.4s
+    84b0: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    84b4: 5e036081     	sha256su1	v1.4s, v4.4s, v3.4s
+    84b8: 4eab8445     	add	v5.4s, v2.4s, v11.4s
+    84bc: 4ea71ce6     	mov	v6.16b, v7.16b
+    84c0: 5e054006     	sha256h	q6, q0, v5.4s
+    84c4: 5e282882     	sha256su0	v2.4s, v4.4s
+    84c8: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    84cc: 5e016062     	sha256su1	v2.4s, v3.4s, v1.4s
+    84d0: 4eb58485     	add	v5.4s, v4.4s, v21.4s
+    84d4: 4ea61cc7     	mov	v7.16b, v6.16b
+    84d8: 5e054007     	sha256h	q7, q0, v5.4s
+    84dc: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    84e0: 4eb78465     	add	v5.4s, v3.4s, v23.4s
+    84e4: 4ea71ce6     	mov	v6.16b, v7.16b
+    84e8: 5e054006     	sha256h	q6, q0, v5.4s
+    84ec: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    84f0: 4ebb8425     	add	v5.4s, v1.4s, v27.4s
+    84f4: 4ea61cc7     	mov	v7.16b, v6.16b
+    84f8: 5e054007     	sha256h	q7, q0, v5.4s
+    84fc: 5e0550c0     	sha256h2	q0, q6, v5.4s
+    8500: 4eac8445     	add	v5.4s, v2.4s, v12.4s
+    8504: 4ea71ce6     	mov	v6.16b, v7.16b
+    8508: 5e054006     	sha256h	q6, q0, v5.4s
+    850c: 5e0550e0     	sha256h2	q0, q7, v5.4s
+    8510: 5e282864     	sha256su0	v4.4s, v3.4s
+    8514: 5e026024     	sha256su1	v4.4s, v1.4s, v2.4s
+    8518: 5e282823     	sha256su0	v3.4s, v1.4s
+    851c: 5e046043     	sha256su1	v3.4s, v2.4s, v4.4s
+    8520: 4eb08482     	add	v2.4s, v4.4s, v16.4s
+    8524: 4ea61cc1     	mov	v1.16b, v6.16b
+    8528: 5e024001     	sha256h	q1, q0, v2.4s
+    852c: 5e0250c0     	sha256h2	q0, q6, v2.4s
+    8530: 4eb18462     	add	v2.4s, v3.4s, v17.4s
+    8534: 4ea01c03     	mov	v3.16b, v0.16b
+    8538: 5e025023     	sha256h2	q3, q1, v2.4s
+    853c: 4eb28463     	add	v3.4s, v3.4s, v18.4s
+    8540: 0e1c3c6a     	mov	w10, v3.s[3]
+    8544: 5ac0094a     	rev	w10, w10
+    8548: 6b1d015f     	cmp	w10, w29
+    854c: 540008c3     	b.lo	0x8664 <engine_thread+0x1064>
+    8550: 54ffe7a8     	b.hi	0x8244 <engine_thread+0xc44>
+    8554: 0e143c6a     	mov	w10, v3.s[2]
+    8558: 5ac0094a     	rev	w10, w10
+    855c: 6b1c015f     	cmp	w10, w28
+    8560: 54000823     	b.lo	0x8664 <engine_thread+0x1064>
+    8564: 54ffe708     	b.hi	0x8244 <engine_thread+0xc44>
+    8568: 0e0c3c6a     	mov	w10, v3.s[1]
+    856c: 5ac0094a     	rev	w10, w10
+    8570: 6b1b015f     	cmp	w10, w27
+    8574: 54000783     	b.lo	0x8664 <engine_thread+0x1064>
+    8578: 54ffe668     	b.hi	0x8244 <engine_thread+0xc44>
+    857c: 1e26006a     	fmov	w10, s3
+    8580: 5ac0094a     	rev	w10, w10
+    8584: 6b13015f     	cmp	w10, w19
+    8588: 540006e3     	b.lo	0x8664 <engine_thread+0x1064>
+    858c: 54ffe5c8     	b.hi	0x8244 <engine_thread+0xc44>
+    8590: 5e024001     	sha256h	q1, q0, v2.4s
+    8594: 4ebc8420     	add	v0.4s, v1.4s, v28.4s
+    8598: 0e1c3c0a     	mov	w10, v0.s[3]
+    859c: 5ac0094a     	rev	w10, w10
+    85a0: 6b17015f     	cmp	w10, w23
+    85a4: 54000603     	b.lo	0x8664 <engine_thread+0x1064>
+    85a8: 54ffe4e8     	b.hi	0x8244 <engine_thread+0xc44>
+    85ac: 0e143c0a     	mov	w10, v0.s[2]
+    85b0: 5ac0094a     	rev	w10, w10
+    85b4: b9401feb     	ldr	w11, [sp, #0x1c]
+    85b8: 6b0b015f     	cmp	w10, w11
+    85bc: 54000543     	b.lo	0x8664 <engine_thread+0x1064>
+    85c0: 54ffe428     	b.hi	0x8244 <engine_thread+0xc44>
+    85c4: 0e0c3c0a     	mov	w10, v0.s[1]
+    85c8: 5ac0094a     	rev	w10, w10
+    85cc: b9401beb     	ldr	w11, [sp, #0x18]
+    85d0: 6b0b015f     	cmp	w10, w11
+    85d4: 54000483     	b.lo	0x8664 <engine_thread+0x1064>
+    85d8: 1e26000b     	fmov	w11, s0
+    85dc: 5ac0096b     	rev	w11, w11
+    85e0: b9401bec     	ldr	w12, [sp, #0x18]
+    85e4: 6b0c015f     	cmp	w10, w12
+    85e8: b94017ea     	ldr	w10, [sp, #0x14]
+    85ec: 7a4a9162     	ccmp	w11, w10, #0x2, ls
+    85f0: 54ffe2a8     	b.hi	0x8244 <engine_thread+0xc44>
+    85f4: 1400001c     	b	0x8664 <engine_thread+0x1064>
+    85f8: aa0903f4     	mov	x20, x9
+    85fc: b40000d4     	cbz	x20, 0x8614 <engine_thread+0x1014>
+    8600: 91006321     	add	x1, x25, #0x18
+    8604: aa0003f5     	mov	x21, x0
+    8608: aa1403e0     	mov	x0, x20
+    860c: 97fff465     	bl	0x57a0 <__aarch64_ldadd8_relax>
+    8610: aa1503e0     	mov	x0, x21
+    8614: 52bfff88     	mov	w8, #-0x40000           // =-262144
+    8618: eb08001f     	cmp	x0, x8
+    861c: 54ff9003     	b.lo	0x781c <engine_thread+0x21c>
+    8620: 91054320     	add	x0, x25, #0x150
+    8624: 9400081f     	bl	0xa6a0 <pthread_mutex_lock@plt>
+    8628: b9403328     	ldr	w8, [x25, #0x30]
+    862c: 35000128     	cbnz	w8, 0x8650 <engine_thread+0x1050>
+    8630: b9402f28     	ldr	w8, [x25, #0x2c]
+    8634: 350000e8     	cbnz	w8, 0x8650 <engine_thread+0x1050>
+    8638: f9400728     	ldr	x8, [x25, #0x8]
+    863c: eb1a011f     	cmp	x8, x26
+    8640: 54000081     	b.ne	0x8650 <engine_thread+0x1050>
+    8644: 52800028     	mov	w8, #0x1                // =1
+    8648: b9002b28     	str	w8, [x25, #0x28]
+    864c: b9002728     	str	w8, [x25, #0x24]
+    8650: 9105e320     	add	x0, x25, #0x178
+    8654: 94000817     	bl	0xa6b0 <pthread_cond_broadcast@plt>
+    8658: 91054320     	add	x0, x25, #0x150
+    865c: 94000819     	bl	0xa6c0 <pthread_mutex_unlock@plt>
+    8660: 14000029     	b	0x8704 <engine_thread+0x1104>
+    8664: 91054320     	add	x0, x25, #0x150
+    8668: 9400080e     	bl	0xa6a0 <pthread_mutex_lock@plt>
+    866c: b9403328     	ldr	w8, [x25, #0x30]
+    8670: 35000108     	cbnz	w8, 0x8690 <engine_thread+0x1090>
+    8674: b9402728     	ldr	w8, [x25, #0x24]
+    8678: 350000c8     	cbnz	w8, 0x8690 <engine_thread+0x1090>
+    867c: b9402f28     	ldr	w8, [x25, #0x2c]
+    8680: 35000088     	cbnz	w8, 0x8690 <engine_thread+0x1090>
+    8684: 52800028     	mov	w8, #0x1                // =1
+    8688: 29065728     	stp	w8, w21, [x25, #0x30]
+    868c: b9002728     	str	w8, [x25, #0x24]
+    8690: 91054320     	add	x0, x25, #0x150
+    8694: 9400080b     	bl	0xa6c0 <pthread_mutex_unlock@plt>
+    8698: 91000680     	add	x0, x20, #0x1
+    869c: 14000002     	b	0x86a4 <engine_thread+0x10a4>
+    86a0: 91000a80     	add	x0, x20, #0x2
+    86a4: 91006321     	add	x1, x25, #0x18
+    86a8: 14000016     	b	0x8700 <engine_thread+0x1100>
+    86ac: 2a2a03e8     	mvn	w8, w10
+    86b0: 531f7d08     	lsr	w8, w8, #31
+    86b4: 110006c9     	add	w9, w22, #0x1
+    86b8: 91000a95     	add	x21, x20, #0x2
+    86bc: 7100011f     	cmp	w8, #0x0
+    86c0: 1a8912d6     	csel	w22, w22, w9, ne
+    86c4: 91054320     	add	x0, x25, #0x150
+    86c8: 940007f6     	bl	0xa6a0 <pthread_mutex_lock@plt>
+    86cc: b9403328     	ldr	w8, [x25, #0x30]
+    86d0: 35000108     	cbnz	w8, 0x86f0 <engine_thread+0x10f0>
+    86d4: b9402728     	ldr	w8, [x25, #0x24]
+    86d8: 350000c8     	cbnz	w8, 0x86f0 <engine_thread+0x10f0>
+    86dc: b9402f28     	ldr	w8, [x25, #0x2c]
+    86e0: 35000088     	cbnz	w8, 0x86f0 <engine_thread+0x10f0>
+    86e4: 52800028     	mov	w8, #0x1                // =1
+    86e8: 29065b28     	stp	w8, w22, [x25, #0x30]
+    86ec: b9002728     	str	w8, [x25, #0x24]
+    86f0: 91054320     	add	x0, x25, #0x150
+    86f4: 940007f3     	bl	0xa6c0 <pthread_mutex_unlock@plt>
+    86f8: 91006321     	add	x1, x25, #0x18
+    86fc: aa1503e0     	mov	x0, x21
+    8700: 97fff428     	bl	0x57a0 <__aarch64_ldadd8_relax>
