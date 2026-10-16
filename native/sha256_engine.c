@@ -617,8 +617,6 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
      * naturally aligned for the ARM NEON/SHA2 load-store sequence. */
     uint32_t first_blocks[8][16] __attribute__((aligned(64)));
     uint32_t states[8][8] __attribute__((aligned(64)));
-    uint32_t target_be[8];
-    for (int i = 0; i < 8; ++i) target_be[i] = BSWAP32(target_words[i]);
     static const uint32_t IV[8] = {
         0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
         0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
@@ -693,14 +691,14 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
     arm_sha256_compress(states[7], first_blocks[7]);
 
     unsigned hits = 0;
-    if (arm_state_meets_target_words_be(states[0], target_be)) hits |= 1U << 0;
-    if (arm_state_meets_target_words_be(states[1], target_be)) hits |= 1U << 1;
-    if (arm_state_meets_target_words_be(states[2], target_be)) hits |= 1U << 2;
-    if (arm_state_meets_target_words_be(states[3], target_be)) hits |= 1U << 3;
-    if (arm_state_meets_target_words_be(states[4], target_be)) hits |= 1U << 4;
-    if (arm_state_meets_target_words_be(states[5], target_be)) hits |= 1U << 5;
-    if (arm_state_meets_target_words_be(states[6], target_be)) hits |= 1U << 6;
-    if (arm_state_meets_target_words_be(states[7], target_be)) hits |= 1U << 7;
+    if (arm_state_meets_target_words(states[0], target_words)) hits |= 1U << 0;
+    if (arm_state_meets_target_words(states[1], target_words)) hits |= 1U << 1;
+    if (arm_state_meets_target_words(states[2], target_words)) hits |= 1U << 2;
+    if (arm_state_meets_target_words(states[3], target_words)) hits |= 1U << 3;
+    if (arm_state_meets_target_words(states[4], target_words)) hits |= 1U << 4;
+    if (arm_state_meets_target_words(states[5], target_words)) hits |= 1U << 5;
+    if (arm_state_meets_target_words(states[6], target_words)) hits |= 1U << 6;
+    if (arm_state_meets_target_words(states[7], target_words)) hits |= 1U << 7;
     return hits;
 }
 #endif
