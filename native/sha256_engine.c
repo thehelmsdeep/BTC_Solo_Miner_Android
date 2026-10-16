@@ -1284,6 +1284,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 uint32_t found_nonce = (hits & 1U) ? (uint32_t)n :
                     (hits & 2U) ? (uint32_t)(n + 1) :
                     (hits & 4U) ? (uint32_t)(n + 2) : (uint32_t)(n + 3);
+                if (!verify_nonce_reference(prefix, target, found_nonce)) continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
