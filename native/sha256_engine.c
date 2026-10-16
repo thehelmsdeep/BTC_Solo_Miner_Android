@@ -580,8 +580,6 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
                                                   uint32_t nonce2, uint32_t nonce3,
                                                   uint32_t nonce4, uint32_t nonce5,
                                                   uint32_t nonce6, uint32_t nonce7) {
-    const uint32_t nonces[8] = {nonce0, nonce1, nonce2, nonce3,
-                                nonce4, nonce5, nonce6, nonce7};
     uint32_t first_blocks[8][16];
     uint32_t states[8][8];
     static const uint32_t IV[8] = {
@@ -589,42 +587,83 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
         0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
     };
 
-    #pragma GCC unroll 8
-    for (int lane = 0; lane < 8; ++lane) {
-        uint32_t *w = first_blocks[lane];
-        w[0] = t0; w[1] = t1; w[2] = t2;
-        w[3] = BSWAP32(nonces[lane]);
-        w[4] = 0x80000000U;
-        for (int i = 5; i < 15; ++i) w[i] = 0;
-        w[15] = 0x00000280U;
-        memcpy(states[lane], base->h, sizeof(states[lane]));
-    }
+    /*
+     * Custom OCTO pipeline: build all eight nonce blocks explicitly so the
+     * compiler sees independent work without a nonce-array lookup or lane
+     * loop in the hot setup path. SHA-256 padding and round semantics remain
+     * standard; only the execution schedule is specialized for ARM64 SHA2.
+     */
+#define OCTO_INIT_LANE(lane, nonce_value) do { \
+        uint32_t *w = first_blocks[lane]; \
+        w[0] = t0; w[1] = t1; w[2] = t2; \
+        w[3] = BSWAP32(nonce_value); \
+        w[4] = 0x80000000U; \
+        for (int j = 5; j < 15; ++j) w[j] = 0; \
+        w[15] = 0x00000280U; \
+        memcpy(states[lane], base->h, sizeof(states[lane])); \
+    } while (0)
+    OCTO_INIT_LANE(0, nonce0);
+    OCTO_INIT_LANE(1, nonce1);
+    OCTO_INIT_LANE(2, nonce2);
+    OCTO_INIT_LANE(3, nonce3);
+    OCTO_INIT_LANE(4, nonce4);
+    OCTO_INIT_LANE(5, nonce5);
+    OCTO_INIT_LANE(6, nonce6);
+    OCTO_INIT_LANE(7, nonce7);
+#undef OCTO_INIT_LANE
 
-    #pragma GCC unroll 8
-    for (int lane = 0; lane < 8; ++lane)
-        arm_sha256_compress(states[lane], first_blocks[lane]);
+    /* Run stage one as eight independent compression chains. */
+    arm_sha256_compress(states[0], first_blocks[0]);
+    arm_sha256_compress(states[1], first_blocks[1]);
+    arm_sha256_compress(states[2], first_blocks[2]);
+    arm_sha256_compress(states[3], first_blocks[3]);
+    arm_sha256_compress(states[4], first_blocks[4]);
+    arm_sha256_compress(states[5], first_blocks[5]);
+    arm_sha256_compress(states[6], first_blocks[6]);
+    arm_sha256_compress(states[7], first_blocks[7]);
 
-    /* Reuse the first-block storage for the second SHA-256 pass.
-     * The first blocks are dead after stage 2, so this removes an entire
-     * 512-byte per-call array and its writes/reads from the hot path. */
-    #pragma GCC unroll 8
-    for (int lane = 0; lane < 8; ++lane) {
-        uint32_t *w = first_blocks[lane];
-        memcpy(w, states[lane], 8 * sizeof(uint32_t));
-        w[8] = 0x80000000U;
-        for (int i = 9; i < 15; ++i) w[i] = 0;
-        w[15] = 0x00000100U;
-        memcpy(states[lane], IV, sizeof(IV));
-    }
+    /*
+     * The first blocks are dead after stage one; reuse their storage for the
+     * second SHA-256 pass, keeping the OCTO stack footprint smaller than a
+     * two-block-per-lane design.
+     */
+#define OCTO_SECOND_BLOCK(lane) do { \
+        uint32_t *w = first_blocks[lane]; \
+        memcpy(w, states[lane], 8 * sizeof(uint32_t)); \
+        w[8] = 0x80000000U; \
+        for (int j = 9; j < 15; ++j) w[j] = 0; \
+        w[15] = 0x00000100U; \
+        memcpy(states[lane], IV, sizeof(IV)); \
+    } while (0)
+    OCTO_SECOND_BLOCK(0);
+    OCTO_SECOND_BLOCK(1);
+    OCTO_SECOND_BLOCK(2);
+    OCTO_SECOND_BLOCK(3);
+    OCTO_SECOND_BLOCK(4);
+    OCTO_SECOND_BLOCK(5);
+    OCTO_SECOND_BLOCK(6);
+    OCTO_SECOND_BLOCK(7);
+#undef OCTO_SECOND_BLOCK
 
-    #pragma GCC unroll 8
-    for (int lane = 0; lane < 8; ++lane)
-        arm_sha256_compress(states[lane], first_blocks[lane]);
+    /* Stage two: eight independent second-hash compressions. */
+    arm_sha256_compress(states[0], first_blocks[0]);
+    arm_sha256_compress(states[1], first_blocks[1]);
+    arm_sha256_compress(states[2], first_blocks[2]);
+    arm_sha256_compress(states[3], first_blocks[3]);
+    arm_sha256_compress(states[4], first_blocks[4]);
+    arm_sha256_compress(states[5], first_blocks[5]);
+    arm_sha256_compress(states[6], first_blocks[6]);
+    arm_sha256_compress(states[7], first_blocks[7]);
 
     unsigned hits = 0;
-    for (int lane = 0; lane < 8; ++lane)
-        if (arm_state_meets_target_words(states[lane], target_words))
-            hits |= 1U << lane;
+    if (arm_state_meets_target_words(states[0], target_words)) hits |= 1U << 0;
+    if (arm_state_meets_target_words(states[1], target_words)) hits |= 1U << 1;
+    if (arm_state_meets_target_words(states[2], target_words)) hits |= 1U << 2;
+    if (arm_state_meets_target_words(states[3], target_words)) hits |= 1U << 3;
+    if (arm_state_meets_target_words(states[4], target_words)) hits |= 1U << 4;
+    if (arm_state_meets_target_words(states[5], target_words)) hits |= 1U << 5;
+    if (arm_state_meets_target_words(states[6], target_words)) hits |= 1U << 6;
+    if (arm_state_meets_target_words(states[7], target_words)) hits |= 1U << 7;
     return hits;
 }
 #endif
