@@ -1103,6 +1103,31 @@ static void engine_wait(BM_ENGINE *e) {
 #endif
 }
 
+/* Independent SHA256d verification for native-engine candidates. This
+ * deliberately uses the reference init/update/final path rather than any
+ * optimized nonce hashing or SIMD comparator. */
+static int verify_nonce_reference(const uint8_t prefix[76],
+                                  const uint8_t target[32],
+                                  uint32_t nonce) {
+    uint8_t header[80], first[32], digest[32];
+    memcpy(header, prefix, 76);
+    header[76] = (uint8_t)nonce;
+    header[77] = (uint8_t)(nonce >> 8);
+    header[78] = (uint8_t)(nonce >> 16);
+    header[79] = (uint8_t)(nonce >> 24);
+
+    SHA256_CTX ctx1;
+    init(&ctx1);
+    update(&ctx1, header, sizeof(header));
+    final(&ctx1, first);
+
+    SHA256_CTX ctx2;
+    init(&ctx2);
+    update(&ctx2, first, sizeof(first));
+    final(&ctx2, digest);
+    return le_target(digest, target);
+}
+
 static void engine_scan(BM_ENGINE_ARG *a) {
     BM_ENGINE *e = a->engine;
     uint8_t prefix[76], target[32];
@@ -1155,7 +1180,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                 /* SIMD hit masks are only candidates. Confirm with the scalar
                  * fast path before publishing a nonce; this prevents a vector
                  * comparison/endianness mismatch from becoming a false PoW hit. */
-                if (!hash_nonce_fast(&base, tail0, tail1, tail2, target, nonces[lane]))
+                if (!verify_nonce_reference(prefix, target, nonces[lane]))
                     continue;
                 engine_lock(e);
                 if(!e->found_valid &&
