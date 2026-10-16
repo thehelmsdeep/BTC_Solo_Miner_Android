@@ -24,8 +24,10 @@ class StructuredLogger:
         self.backup_count = backup_count
         self._lock = threading.Lock()
         self._error_count = 0
+        self._warning_count = 0
         self._mining_started_at = time.monotonic()
         self._last_error_text = "None"
+        self._last_warning_text = "None"
 
         self._human_logger = logging.getLogger("solo_miner.human")
         self._human_logger.setLevel(logging.INFO)
@@ -56,7 +58,7 @@ class StructuredLogger:
         self._human_logger.info("%s", str(message))
 
     def record_error(self, message, **fields):
-        """Record an error with cumulative count and mining duration."""
+        """Record a bug/error for the live dashboard and persistent logs."""
         with self._lock:
             self._error_count += 1
             count = self._error_count
@@ -66,9 +68,58 @@ class StructuredLogger:
             "ERROR_COUNT=%d | ERROR_TEXT=%s | MINING_DURATION=%s",
             count, str(message), self._format_duration(duration),
         )
-        self.event("runtime_error", error_count=count, error_text=str(message),
+        self.event("runtime_error", severity="error", error_count=count,
+                   error_text=str(message),
                    mining_duration_seconds=round(duration, 3), **fields)
         return count
+
+    def record_warning(self, message, **fields):
+        """Record a warning for the live dashboard and persistent logs."""
+        with self._lock:
+            self._warning_count += 1
+            count = self._warning_count
+            self._last_warning_text = str(message)
+        duration = max(0.0, time.monotonic() - self._mining_started_at)
+        self._human_logger.warning(
+            "WARNING_COUNT=%d | WARNING_TEXT=%s | MINING_DURATION=%s",
+            count, str(message), self._format_duration(duration),
+        )
+        self.event("runtime_warning", severity="warning", warning_count=count,
+                   warning_text=str(message),
+                   mining_duration_seconds=round(duration, 3), **fields)
+        return count
+
+    @staticmethod
+    def classify_issue(message):
+        """Return 'error', 'warning', or None for issue-like log messages."""
+        text = str(message).lower()
+        warning_terms = (
+            "warning", "warn:", "[?]", "timeout", "timed out", "rejected",
+            "nonce space exhausted", "stale", "unknown", "fallback",
+            "unavailable", "reconnect", "disconnected", "connection closed",
+            "candidate detected",
+        )
+        error_terms = (
+            "error", "failed", "failure", "exception", "traceback", "invalid",
+            "malformed", "unable", "critical", "crash", "not submitting",
+            "verification failed", "worker error", "handler error",
+            "authorization failed", "self-test: failed", "self-test failed",
+            "build failed", "load failed",
+        )
+        if any(term in text for term in error_terms):
+            return "error"
+        if any(term in text for term in warning_terms) or "[!]" in text:
+            return "warning"
+        return None
+
+    def report_issue(self, message, **fields):
+        """Classify and count an issue once per explicit reporting call."""
+        severity = self.classify_issue(message)
+        if severity == "error":
+            return self.record_error(message, **fields)
+        if severity == "warning":
+            return self.record_warning(message, **fields)
+        return None
 
     @staticmethod
     def _format_duration(seconds):
@@ -81,10 +132,14 @@ class StructuredLogger:
         with self._lock:
             count = self._error_count
             last_error = self._last_error_text
+            warning_count = self._warning_count
+            last_warning = self._last_warning_text
         duration = max(0.0, time.monotonic() - self._mining_started_at)
         return {
             "error_count": count,
             "last_error": last_error,
+            "warning_count": warning_count,
+            "last_warning": last_warning,
             "mining_duration": self._format_duration(duration),
             "mining_duration_seconds": round(duration, 3),
         }
