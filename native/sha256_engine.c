@@ -651,6 +651,10 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX * restrict bas
     OCTO_INIT_LANE(7, nonce7);
 #undef OCTO_INIT_LANE
 
+    /* Decode the target once per batch so each candidate comparison avoids BSWAP. */
+    uint32_t target_be[8];
+    for (int i = 0; i < 8; ++i) target_be[i] = BSWAP32(target_words[i]);
+
     /* Run stage one as eight independent compression chains. */
     arm_sha256_compress(states[0], first_blocks[0]);
     arm_sha256_compress(states[1], first_blocks[1]);
@@ -696,14 +700,14 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX * restrict bas
     arm_sha256_compress(states[7], first_blocks[7]);
 
     unsigned hits = 0;
-    if (arm_state_meets_target_words(states[0], target_words)) hits |= 1U << 0;
-    if (arm_state_meets_target_words(states[1], target_words)) hits |= 1U << 1;
-    if (arm_state_meets_target_words(states[2], target_words)) hits |= 1U << 2;
-    if (arm_state_meets_target_words(states[3], target_words)) hits |= 1U << 3;
-    if (arm_state_meets_target_words(states[4], target_words)) hits |= 1U << 4;
-    if (arm_state_meets_target_words(states[5], target_words)) hits |= 1U << 5;
-    if (arm_state_meets_target_words(states[6], target_words)) hits |= 1U << 6;
-    if (arm_state_meets_target_words(states[7], target_words)) hits |= 1U << 7;
+    if (arm_state_meets_target_words_be(states[0], target_be)) hits |= 1U << 0;
+    if (arm_state_meets_target_words_be(states[1], target_be)) hits |= 1U << 1;
+    if (arm_state_meets_target_words_be(states[2], target_be)) hits |= 1U << 2;
+    if (arm_state_meets_target_words_be(states[3], target_be)) hits |= 1U << 3;
+    if (arm_state_meets_target_words_be(states[4], target_be)) hits |= 1U << 4;
+    if (arm_state_meets_target_words_be(states[5], target_be)) hits |= 1U << 5;
+    if (arm_state_meets_target_words_be(states[6], target_be)) hits |= 1U << 6;
+    if (arm_state_meets_target_words_be(states[7], target_be)) hits |= 1U << 7;
     return hits;
 }
 #endif
