@@ -1191,13 +1191,23 @@ def miner_loop():
                     continue
 
                 hit, found, hashes = native_engine_poll(engine)
+                # Account for the final completed nonce chunk even when the engine
+                # reports exhaustion in the same polling interval.
+                if hashes:
+                    hashes_since_report += hashes
+                    ctx.total_hashes += hashes
+                    metrics.add_hashes(hashes)
+
                 # Preserve a hit even if its final nonce chunk also exhausts the nonce space.
                 if native_engine_exhausted(engine) and not hit:
                     extranonce2_size = int(current_job["extranonce2_size"])
                     mask = (1 << (8 * extranonce2_size)) - 1
-                    extranonce2 = (time.time_ns() & mask).to_bytes(
-                        extranonce2_size, "big"
-                    ).hex()
+                    # Advance the previous value deterministically instead of deriving
+                    # it from the clock, so consecutive nonce-space rotations cannot
+                    # accidentally reuse the same extranonce2.
+                    extranonce2 = (
+                        (int(current_job["extranonce2"], 16) + 1) & mask
+                    ).to_bytes(extranonce2_size, "big").hex()
                     header_prefix = build_header_prefix(current_job, extranonce2)
                     target = compact_to_target(current_job["nbits"])
                     if not native_engine_set_job(engine, header_prefix, target):
@@ -1211,10 +1221,6 @@ def miner_loop():
 
                     print(Fore.YELLOW, "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job")
                     continue
-                if hashes:
-                    hashes_since_report += hashes
-                    ctx.total_hashes += hashes
-                    metrics.add_hashes(hashes)
 
                 if hit:
                     # A notify/set_extranonce can arrive while the native engine is
