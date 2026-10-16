@@ -9,19 +9,17 @@ try:
 except ImportError:  # Windows
     resource = None
 import threading
-import time
 
 
 def memory_snapshot():
-    result = {
-        "pid": os.getpid(),
-        "thread_count": threading.active_count(),
-    }
+    result = {"pid": os.getpid()}
     try:
         import psutil  # Optional dependency only; miner works without it.
         process = psutil.Process()
         result["rss_bytes"] = process.memory_info().rss
-        result["process_count"] = len(psutil.Process().children(recursive=True)) + 1
+        result["process_count"] = len(process.children(recursive=True)) + 1
+        # Count OS threads, including native pthreads created by the C miner.
+        result["thread_count"] = process.num_threads()
         result["memory_source"] = "psutil"
         return result
     except Exception:
@@ -34,15 +32,22 @@ def memory_snapshot():
                 if line.startswith("VmRSS:"):
                     result["rss_bytes"] = int(line.split()[1]) * 1024
                     result["memory_source"] = "/proc/self/status"
-                    break
+                elif line.startswith("Threads:"):
+                    # /proc reports all process threads, not just Python threads.
+                    result["thread_count"] = int(line.split()[1])
     except (OSError, ValueError, IndexError):
         pass
+
+    # Last-resort fallback for platforms without psutil or /proc.
+    result.setdefault("thread_count", threading.active_count())
 
     try:
         if resource is not None:
             # ru_maxrss is KiB on Linux, bytes on macOS.
             peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            result["peak_rss_bytes"] = int(peak if os.sys.platform == "darwin" else peak * 1024)
+            result["peak_rss_bytes"] = int(
+                peak if os.sys.platform == "darwin" else peak * 1024
+            )
     except (AttributeError, OSError, ValueError):
         pass
     return result
