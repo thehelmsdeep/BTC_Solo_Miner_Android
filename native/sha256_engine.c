@@ -583,7 +583,6 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
     const uint32_t nonces[8] = {nonce0, nonce1, nonce2, nonce3,
                                 nonce4, nonce5, nonce6, nonce7};
     uint32_t first_blocks[8][16];
-    uint32_t second_blocks[8][16];
     uint32_t states[8][8];
     static const uint32_t IV[8] = {
         0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
@@ -605,18 +604,22 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
     for (int lane = 0; lane < 8; ++lane)
         arm_sha256_compress(states[lane], first_blocks[lane]);
 
+    /* Reuse the first-block storage for the second SHA-256 pass.
+     * The first blocks are dead after stage 2, so this removes an entire
+     * 512-byte per-call array and its writes/reads from the hot path. */
     #pragma GCC unroll 8
     for (int lane = 0; lane < 8; ++lane) {
-        memcpy(second_blocks[lane], states[lane], 8 * sizeof(uint32_t));
-        second_blocks[lane][8] = 0x80000000U;
-        for (int i = 9; i < 15; ++i) second_blocks[lane][i] = 0;
-        second_blocks[lane][15] = 0x00000100U;
+        uint32_t *w = first_blocks[lane];
+        memcpy(w, states[lane], 8 * sizeof(uint32_t));
+        w[8] = 0x80000000U;
+        for (int i = 9; i < 15; ++i) w[i] = 0;
+        w[15] = 0x00000100U;
         memcpy(states[lane], IV, sizeof(IV));
     }
 
     #pragma GCC unroll 8
     for (int lane = 0; lane < 8; ++lane)
-        arm_sha256_compress(states[lane], second_blocks[lane]);
+        arm_sha256_compress(states[lane], first_blocks[lane]);
 
     unsigned hits = 0;
     for (int lane = 0; lane < 8; ++lane)
