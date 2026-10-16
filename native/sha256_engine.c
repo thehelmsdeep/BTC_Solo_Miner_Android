@@ -633,8 +633,9 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
         w[0] = t0; w[1] = t1; w[2] = t2; \
         w[3] = BSWAP32(nonce_value); \
         w[4] = 0x80000000U; \
-        for (int j = 5; j < 15; ++j) w[j] = 0; \
-        w[15] = 0x00000280U; \
+        w[5] = 0; w[6] = 0; w[7] = 0; w[8] = 0; \
+        w[9] = 0; w[10] = 0; w[11] = 0; w[12] = 0; \
+        w[13] = 0; w[14] = 0; w[15] = 0x00000280U; \
         memcpy(states[lane], base->h, sizeof(states[lane])); \
     } while (0)
     OCTO_INIT_LANE(0, nonce0);
@@ -666,7 +667,8 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
         uint32_t *w = first_blocks[lane]; \
         memcpy(w, states[lane], 8 * sizeof(uint32_t)); \
         w[8] = 0x80000000U; \
-        for (int j = 9; j < 15; ++j) w[j] = 0; \
+        w[9] = 0; w[10] = 0; w[11] = 0; \
+        w[12] = 0; w[13] = 0; w[14] = 0; \
         w[15] = 0x00000100U; \
         memcpy(states[lane], IV, sizeof(IV)); \
     } while (0)
