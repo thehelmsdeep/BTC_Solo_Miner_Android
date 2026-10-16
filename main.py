@@ -333,7 +333,9 @@ def ensure_native():
         _native=lib
         return lib
     except OSError as exc:
-        print(Fore.YELLOW, "[!] Native engine load failed; using Python fallback:", exc)
+        message = "[!] Native engine load failed; using Python fallback: %s" % exc
+        print(Fore.YELLOW, message)
+        logg(message)
         return None
 
 
