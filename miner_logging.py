@@ -25,6 +25,7 @@ class StructuredLogger:
         self._lock = threading.Lock()
         self._error_count = 0
         self._mining_started_at = time.monotonic()
+        self._last_error_text = "None"
 
         self._human_logger = logging.getLogger("solo_miner.human")
         self._human_logger.setLevel(logging.INFO)
@@ -59,6 +60,7 @@ class StructuredLogger:
         with self._lock:
             self._error_count += 1
             count = self._error_count
+            self._last_error_text = str(message)
         duration = max(0.0, time.monotonic() - self._mining_started_at)
         self._human_logger.error(
             "ERROR_COUNT=%d | ERROR_TEXT=%s | MINING_DURATION=%s",
@@ -74,6 +76,18 @@ class StructuredLogger:
         hours, remainder = divmod(total, 3600)
         minutes, secs = divmod(remainder, 60)
         return "%02d:%02d:%02d" % (hours, minutes, secs)
+
+    def dashboard_snapshot(self):
+        with self._lock:
+            count = self._error_count
+            last_error = self._last_error_text
+        duration = max(0.0, time.monotonic() - self._mining_started_at)
+        return {
+            "error_count": count,
+            "last_error": last_error,
+            "mining_duration": self._format_duration(duration),
+            "mining_duration_seconds": round(duration, 3),
+        }
 
     def log_mining_status(self, **fields):
         duration = max(0.0, time.monotonic() - self._mining_started_at)
