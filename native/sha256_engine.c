@@ -1694,10 +1694,10 @@ int b_m_selftest(void) {
             uint8_t digest[32], lower[32];
             hash_nonce_arm_digest(&base, t0, t1, t2, ns[lane], digest);
             for (int i = 0; i < 8; ++i)
-                tw[i] = ((uint32_t)digest[i * 4] << 24) |
-                        ((uint32_t)digest[i * 4 + 1] << 16) |
-                        ((uint32_t)digest[i * 4 + 2] << 8) |
-                        (uint32_t)digest[i * 4 + 3];
+                tw[i] = (uint32_t)digest[i * 4] |
+                        ((uint32_t)digest[i * 4 + 1] << 8) |
+                        ((uint32_t)digest[i * 4 + 2] << 16) |
+                        ((uint32_t)digest[i * 4 + 3] << 24);
             unsigned hits = hash_nonce_arm_quad_words(&base, t0, t1, t2,
                 tw, ns[0], ns[1], ns[2], ns[3]);
             if (!(hits & (1U << lane))) return 5;
@@ -1711,10 +1711,10 @@ int b_m_selftest(void) {
                 lower[j] = 0xff;
             }
             for (int i = 0; i < 8; ++i)
-                tw[i] = ((uint32_t)lower[i * 4] << 24) |
-                        ((uint32_t)lower[i * 4 + 1] << 16) |
-                        ((uint32_t)lower[i * 4 + 2] << 8) |
-                        (uint32_t)lower[i * 4 + 3];
+                tw[i] = (uint32_t)lower[i * 4] |
+                        ((uint32_t)lower[i * 4 + 1] << 8) |
+                        ((uint32_t)lower[i * 4 + 2] << 16) |
+                        ((uint32_t)lower[i * 4 + 3] << 24);
             hits = hash_nonce_arm_quad_words(&base, t0, t1, t2,
                 tw, ns[0], ns[1], ns[2], ns[3]);
             if (hits & (1U << lane)) return 5;
