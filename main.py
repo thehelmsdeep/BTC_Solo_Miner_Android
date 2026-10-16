@@ -1078,7 +1078,8 @@ def miner_loop():
                     continue
 
                 hit, found, hashes = native_engine_poll(engine)
-                if native_engine_exhausted(engine):
+                # Preserve a hit even if its final nonce chunk also exhausts the nonce space.
+                if native_engine_exhausted(engine) and not hit:
                     extranonce2_size = int(ctx.upstream_extranonce2_size)
                     mask = (1 << (8 * extranonce2_size)) - 1
                     extranonce2 = (time.time_ns() & mask).to_bytes(
