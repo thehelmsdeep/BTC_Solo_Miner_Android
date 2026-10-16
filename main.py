@@ -629,33 +629,58 @@ def submit_selftest():
     return decoded == payload
 
 
-def submit_share(job_id, extranonce2, ntime, nonce):
-    with ctx.pending_submits_lock:
-        submit_id = ctx.next_submit_id
-        ctx.next_submit_id += 1
-        ctx.pending_submits[submit_id] = time.monotonic()
+def submit_share(job_id, extranonce2, ntime, nonce, expected_generation=None):
+    """Submit a verified candidate only while its exact Stratum job is current."""
+    if not isinstance(job_id, str) or not job_id:
+        raise ValueError("Invalid job id for mining.submit")
+    _validate_hex_blob(extranonce2, "submit extranonce2")
+    _validate_hex(ntime, 8, "submit ntime")
+    if isinstance(nonce, bool) or not isinstance(nonce, int) or not 0 <= nonce <= 0xFFFFFFFF:
+        raise ValueError("Invalid nonce for mining.submit")
 
-    payload = submit_payload(
-        job_id, extranonce2, ntime, nonce, submit_id
-    )
-    debug_log("Share submission attempt", submit_id=submit_id, job_id=job_id,
-              nonce="%08x" % nonce, extranonce2=extranonce2, ntime=ntime,
-              wallet=ADDRESS, payload_method=payload["method"])
+    # Keep job generation stable from the final freshness check through socket
+    # write. Otherwise mining.notify/set_extranonce can race between the check
+    # and send, causing a valid candidate to be submitted against stale metadata.
+    with ctx.job_lock:
+        if expected_generation is not None and ctx.job_generation != expected_generation:
+            debug_log(
+                "Candidate not submitted because job changed",
+                job_id=job_id, expected_generation=expected_generation,
+                current_generation=ctx.job_generation, nonce="%08x" % nonce,
+            )
+            logg("[!] Candidate not submitted: job changed before mining.submit")
+            return None
+        if not ctx.upstream_alive or ctx.upstream_sock is None:
+            raise ConnectionError("Cannot submit candidate: Stratum connection is not active")
 
-    try:
-        with ctx.upstream_send_lock:
-            send_json(ctx.upstream_sock, payload)
-    except Exception:
         with ctx.pending_submits_lock:
-            ctx.pending_submits.pop(submit_id, None)
-        raise
+            submit_id = ctx.next_submit_id
+            ctx.next_submit_id += 1
+            ctx.pending_submits[submit_id] = time.monotonic()
+
+        payload = submit_payload(job_id, extranonce2, ntime, nonce, submit_id)
+        debug_log("Share submission attempt", submit_id=submit_id, job_id=job_id,
+                  nonce="%08x" % nonce, extranonce2=extranonce2, ntime=ntime,
+                  wallet=ADDRESS, payload_method=payload["method"],
+                  job_generation=expected_generation)
+
+        try:
+            with ctx.upstream_send_lock:
+                send_json(ctx.upstream_sock, payload)
+        except Exception:
+            with ctx.pending_submits_lock:
+                ctx.pending_submits.pop(submit_id, None)
+            raise
 
     ctx.shares_submitted += 1
     metrics.share_submitted()
     logg("[*] Share submitted: id=%s job=%s nonce=%08x" %
          (submit_id, job_id, nonce))
-    structured_logger.event("share_submitted", submit_id=submit_id, job_id=job_id,
-                            nonce="%08x" % nonce, extranonce2=extranonce2, ntime=ntime)
+    structured_logger.event(
+        "share_submitted", submit_id=submit_id, job_id=job_id,
+        nonce="%08x" % nonce, extranonce2=extranonce2, ntime=ntime,
+        wallet=ADDRESS, job_generation=expected_generation,
+    )
     return submit_id
 
 
@@ -1154,6 +1179,7 @@ def miner_loop():
                                 found_snapshot["extranonce2"],
                                 found_snapshot["ntime"],
                                 found,
+                                expected_generation=found_snapshot["generation"],
                             )
                     except Exception as exc:
                         print(Fore.RED, "[!] Share submit failed:", exc)
@@ -1313,7 +1339,10 @@ def miner_loop():
                                 debug_log("Target verification passed", engine="python",
                                           job_id=found_job, nonce="%08x" % nonce,
                                           target_hex="%064x" % found_target)
-                                submit_share(found_job, extranonce2, found_ntime, nonce)
+                                submit_share(
+                                    found_job, extranonce2, found_ntime, nonce,
+                                    expected_generation=job["generation"],
+                                )
                         except Exception as exc:
                             print(Fore.RED, "[!] Share submit failed:", exc)
                         break
@@ -1422,6 +1451,8 @@ def run():
                       reconnect_delay=RECONNECT_DELAY)
 
         finally:
+            # Stop new submissions before invalidating this session. Any pending
+            # response at disconnect is unknown, not a confirmed pool rejection.
             ctx.connected = False
             ctx.upstream_alive = False
             try:
@@ -1429,8 +1460,40 @@ def run():
             except Exception:
                 pass
             ctx.upstream_sock = None
+
+            with ctx.pending_submits_lock:
+                abandoned_submits = list(ctx.pending_submits.items())
+                ctx.pending_submits.clear()
+            for submit_id, submitted_at in abandoned_submits:
+                age = max(0.0, time.monotonic() - submitted_at)
+                structured_logger.event(
+                    "share_response_unknown", submit_id=submit_id,
+                    age_seconds=round(age, 6),
+                    reason="connection_closed_before_response",
+                )
+                debug_log(
+                    "Share response unknown after disconnect",
+                    submit_id=submit_id, age_seconds=round(age, 6),
+                )
+
+            # Do not carry a job or extranonce snapshot across TCP sessions.
+            with ctx.job_lock:
+                ctx.job_id = None
+                ctx.prevhash = None
+                ctx.coinb1 = None
+                ctx.coinb2 = None
+                ctx.merkle_branch = None
+                ctx.version = None
+                ctx.nbits = None
+                ctx.ntime = None
+                ctx.clean_jobs = False
+                ctx.upstream_extranonce1 = None
+                ctx.upstream_extranonce2_size = 4
+                ctx.job_generation += 1
+
             debug_log("Connection closed", host=UPSTREAM_HOST, port=UPSTREAM_PORT,
-                      shutdown=ctx.fShutdown)
+                      shutdown=ctx.fShutdown,
+                      abandoned_submits=len(abandoned_submits))
 
         if not ctx.fShutdown:
             if state_machine.state != MinerState.RECONNECTING:
