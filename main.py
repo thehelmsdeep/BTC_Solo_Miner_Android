@@ -60,6 +60,35 @@ share_stats = {
     "submit_times": [],
 }
 
+# Proof-of-work candidate telemetry for the live dashboard (runtime session).
+pow_stats_lock = threading.Lock()
+pow_stats = {
+    "candidates": 0,
+    "verified": 0,
+    "verification_failed": 0,
+    "last_at": None,
+    "last_status": "none",
+    "last_job": "",
+    "last_nonce": "",
+    "last_engine": "",
+}
+
+def record_pow_status(status, job_id, nonce, engine):
+    """Keep the latest candidate and verification outcome visible on screen."""
+    with pow_stats_lock:
+        if status == "candidate":
+            pow_stats["candidates"] += 1
+        elif status == "verified":
+            pow_stats["verified"] += 1
+        elif status == "verification_failed":
+            pow_stats["verification_failed"] += 1
+        pow_stats["last_at"] = time.monotonic()
+        pow_stats["last_status"] = status
+        pow_stats["last_job"] = str(job_id)
+        pow_stats["last_nonce"] = "%08x" % int(nonce)
+        pow_stats["last_engine"] = engine
+
+
 
 def timer():
     return datetime.now().time()
@@ -142,6 +171,23 @@ def render_dashboard(rate, interval_hashes=None):
     print("Share Latency: avg %.3fs | max %.3fs" % (average_latency, latency_max))
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
+    with pow_stats_lock:
+        candidate_count = pow_stats["candidates"]
+        verified_count = pow_stats["verified"]
+        verification_failed_count = pow_stats["verification_failed"]
+        pow_last_at = pow_stats["last_at"]
+        pow_last_status = pow_stats["last_status"]
+        pow_last_job = pow_stats["last_job"]
+        pow_last_nonce = pow_stats["last_nonce"]
+        pow_last_engine = pow_stats["last_engine"]
+    pow_age = now_mono - pow_last_at if pow_last_at is not None else None
+    print("PoW Candidates: %s" % format(candidate_count, ","))
+    print("PoW Verified  : %s" % format(verified_count, ","))
+    print("PoW Verify Fail: %s" % format(verification_failed_count, ","))
+    print("Last PoW Hit  : %s" % ("never" if pow_age is None else "%.1fs ago" % pow_age))
+    print("Last PoW State: %s" % pow_last_status)
+    if pow_last_job:
+        print("PoW Job/Nonce : %s / %s (%s)" % (pow_last_job, pow_last_nonce, pow_last_engine))
     snapshot = structured_logger.dashboard_snapshot()
     print("Bug Count    : %d" % snapshot["error_count"])
     print("Bugs (all recorded):")
@@ -1368,6 +1414,7 @@ def miner_loop():
                     print(Style.RESET_ALL)
                     logg("[!] POW candidate detected; independent verification pending: job=%s nonce=%08x nbits=%s" %
                          (current_job["job_id"], found, current_job["nbits"]))
+                    record_pow_status("candidate", current_job["job_id"], found, "native")
                     # Re-hash the exact header used by native before any network submit.
                     found_snapshot = dict(current_job)
                     try:
@@ -1379,12 +1426,14 @@ def miner_loop():
                             print(Fore.RED, "[!] Native hit failed independent SHA256d verification; NOT submitting")
                             logg("[!] Native hit rejected by independent verification: job=%s nonce=%08x" %
                                  (found_snapshot["job_id"], found))
+                            record_pow_status("verification_failed", found_snapshot["job_id"], found, "native")
                             debug_log("Target verification failed", engine="native",
                                       job_id=found_snapshot["job_id"], nonce="%08x" % found,
                                       target_hex="%064x" % found_snapshot["target"])
                         else:
                             logg("[+] SHA256d/target verification PASSED: job=%s nonce=%08x wallet=%s" %
                                  (found_snapshot["job_id"], found, ADDRESS))
+                            record_pow_status("verified", found_snapshot["job_id"], found, "native")
                             structured_logger.event(
                                 "pow_candidate_verified", engine="native",
                                 job_id=found_snapshot["job_id"], nonce="%08x" % found,
@@ -1534,6 +1583,7 @@ def miner_loop():
                         print(Style.RESET_ALL)
                         logg("[!] POW candidate detected; independent verification pending: job=%s nonce=%08x nbits=%s" %
                              (found_job, nonce, job["nbits"]))
+                        record_pow_status("candidate", found_job, nonce, "python")
 
                         # A notify can race with result_queue delivery. Never
                         # submit a hit from an obsolete job generation.
@@ -1551,12 +1601,14 @@ def miner_loop():
                                 print(Fore.RED, "[!] Python-engine hit failed independent SHA256d verification; NOT submitting")
                                 logg("[!] Python hit rejected by independent verification: job=%s nonce=%08x" %
                                      (found_job, nonce))
+                                record_pow_status("verification_failed", found_job, nonce, "python")
                                 debug_log("Target verification failed", engine="python",
                                           job_id=found_job, nonce="%08x" % nonce,
                                           target_hex="%064x" % found_target)
                             else:
                                 logg("[+] SHA256d/target verification PASSED: job=%s nonce=%08x wallet=%s" %
                                      (found_job, nonce, ADDRESS))
+                                record_pow_status("verified", found_job, nonce, "python")
                                 structured_logger.event(
                                     "pow_candidate_verified", engine="python",
                                     job_id=found_job, nonce="%08x" % nonce,
