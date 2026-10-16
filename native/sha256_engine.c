@@ -519,9 +519,10 @@ static inline int hash_nonce_arm_words(const SHA256_CTX *base,
      * fixed-size lexicographic comparison avoids loop/index overhead in the
      * per-nonce hot path while preserving Bitcoin's little-endian target rule. */
 #define ARM_TARGET_WORD_CHECK(i) do { \
-        uint32_t hash_word = state[i]; \
-        if (hash_word < target_words[i]) return 1; \
-        if (hash_word > target_words[i]) return 0; \
+        uint32_t hash_word = BSWAP32(state[i]); \
+        uint32_t target_word = BSWAP32(target_words[i]); \
+        if (hash_word < target_word) return 1; \
+        if (hash_word > target_word) return 0; \
     } while (0)
     ARM_TARGET_WORD_CHECK(7);
     ARM_TARGET_WORD_CHECK(6);
@@ -549,12 +550,12 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
     int cmp0 = 0, cmp1 = 0;
     for (int i = 7; i >= 0; --i) {
         if (cmp0 == 0) {
-            uint32_t h = s0[i];
+            uint32_t h = BSWAP32(s0[i]);
             if (h < target_words[i]) cmp0 = 1;
             else if (h > target_words[i]) cmp0 = -1;
         }
         if (cmp1 == 0) {
-            uint32_t h = s1[i];
+            uint32_t h = BSWAP32(s1[i]);
             if (h < target_words[i]) cmp1 = 1;
             else if (h > target_words[i]) cmp1 = -1;
         }
@@ -631,9 +632,10 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
 static inline int arm_state_meets_target_words(const uint32_t state[8],
                                                 const uint32_t target_words[8]) {
 #define ARM_STATE_TARGET_CHECK(i) do { \
-    uint32_t hash_word = state[i]; \
-    if (hash_word < target_words[i]) return 1; \
-    if (hash_word > target_words[i]) return 0; \
+    uint32_t hash_word = BSWAP32(state[i]); \
+    uint32_t target_word = BSWAP32(target_words[i]); \
+    if (hash_word < target_word) return 1; \
+    if (hash_word > target_word) return 0; \
 } while (0)
     ARM_STATE_TARGET_CHECK(7);
     ARM_STATE_TARGET_CHECK(6);
