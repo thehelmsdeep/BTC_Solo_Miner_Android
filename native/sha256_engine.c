@@ -349,7 +349,7 @@ static void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     b_m_arm_sha256_compress_asm(h, w, K);
 }
 #else
-static void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
+static inline __attribute__((always_inline)) void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     uint32x4_t STATE0 = vld1q_u32(&h[0]);
     uint32x4_t STATE1 = vld1q_u32(&h[4]);
     uint32x4_t ABEF_SAVE = STATE0;
