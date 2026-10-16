@@ -1084,7 +1084,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             local += 4;
             for (int lane=0;lane<4;lane++) if (hits[lane]) {
                 engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
                     e->found_nonce=nonces[lane];
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
@@ -1124,7 +1124,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                     (hits & 32U) ? (uint32_t)(n + 5) :
                     (hits & 64U) ? (uint32_t)(n + 6) : (uint32_t)(n + 7);
                 engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
                     e->found_nonce=found_nonce;
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
@@ -1156,7 +1156,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                     (hits & 2U) ? (uint32_t)(n + 1) :
                     (hits & 4U) ? (uint32_t)(n + 2) : (uint32_t)(n + 3);
                 engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
                     e->found_nonce=found_nonce;
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
@@ -1186,7 +1186,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             if (hits) {
                 uint32_t found_nonce = (hits & 1U) ? (uint32_t)n : (uint32_t)(n + 1);
                 engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
                     e->found_nonce=found_nonce;
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
@@ -1210,7 +1210,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         for (; n < end; ++n) {
             if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n)) {
                 engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
                     e->found_nonce=(uint32_t)n;
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
@@ -1225,7 +1225,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         for (; n < end; ++n) {
             if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
                 engine_lock(e);
-                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)) {
+                if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
                     e->found_nonce=(uint32_t)n;
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
