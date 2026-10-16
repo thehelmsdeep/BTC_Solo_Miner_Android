@@ -23,6 +23,8 @@ class StructuredLogger:
         self.max_bytes = max_bytes
         self.backup_count = backup_count
         self._lock = threading.Lock()
+        self._error_count = 0
+        self._mining_started_at = time.monotonic()
 
         self._human_logger = logging.getLogger("solo_miner.human")
         self._human_logger.setLevel(logging.INFO)
@@ -51,6 +53,35 @@ class StructuredLogger:
 
     def log(self, message):
         self._human_logger.info("%s", str(message))
+
+    def record_error(self, message, **fields):
+        """Record an error with cumulative count and mining duration."""
+        with self._lock:
+            self._error_count += 1
+            count = self._error_count
+        duration = max(0.0, time.monotonic() - self._mining_started_at)
+        self._human_logger.error(
+            "ERROR_COUNT=%d | ERROR_TEXT=%s | MINING_DURATION=%s",
+            count, str(message), self._format_duration(duration),
+        )
+        self.event("runtime_error", error_count=count, error_text=str(message),
+                   mining_duration_seconds=round(duration, 3), **fields)
+        return count
+
+    @staticmethod
+    def _format_duration(seconds):
+        total = int(seconds)
+        hours, remainder = divmod(total, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return "%02d:%02d:%02d" % (hours, minutes, secs)
+
+    def log_mining_status(self, **fields):
+        duration = max(0.0, time.monotonic() - self._mining_started_at)
+        with self._lock:
+            count = self._error_count
+        self.event("mining_status", error_count=count,
+                   mining_duration=self._format_duration(duration),
+                   mining_duration_seconds=round(duration, 3), **fields)
 
     def debug(self, message, **fields):
         detail = json.dumps(fields, sort_keys=True, default=str) if fields else ""
