@@ -469,9 +469,20 @@ def stratum_prevhash_to_header(prevhash):
 
 
 def build_header_prefix(job, extranonce2):
+    """Build the exact header prefix from one immutable Stratum job snapshot."""
+    extranonce1 = job.get("extranonce1")
+    extranonce2_size = job.get("extranonce2_size")
+    if not isinstance(extranonce1, str):
+        raise ValueError("Job snapshot is missing extranonce1")
+    _validate_hex_blob(extranonce1, "job extranonce1")
+    _validate_hex_blob(extranonce2, "extranonce2")
+    if isinstance(extranonce2_size, bool) or not isinstance(extranonce2_size, int):
+        raise ValueError("Job snapshot is missing extranonce2_size")
+    if len(extranonce2) != extranonce2_size * 2:
+        raise ValueError("extranonce2 length does not match subscribed Stratum size")
+
     coinbase = bytes.fromhex(
-        job["coinb1"] + (job.get("extranonce1") or ctx.upstream_extranonce1) +
-        extranonce2 + job["coinb2"]
+        job["coinb1"] + extranonce1 + extranonce2 + job["coinb2"]
     )
 
     coinbase_hash = double_sha256(coinbase)
@@ -562,7 +573,7 @@ def start_workers(job):
     result_queue = mp.Queue()
     workers = []
 
-    extranonce2_size = int(ctx.upstream_extranonce2_size)
+    extranonce2_size = int(job["extranonce2_size"])
     if extranonce2_size <= 0:
         raise RuntimeError("Invalid upstream extranonce2_size")
 
@@ -937,6 +948,7 @@ def current_job():
             "ntime": ctx.ntime,
             "clean_jobs": ctx.clean_jobs,
             "extranonce1": ctx.upstream_extranonce1,
+            "extranonce2_size": ctx.upstream_extranonce2_size,
             "generation": ctx.job_generation,
         }
 
@@ -1056,7 +1068,7 @@ def miner_loop():
                     continue
 
                 if job["generation"] != current_generation and not waiting_for_new_job:
-                    extranonce2_size = int(ctx.upstream_extranonce2_size)
+                    extranonce2_size = int(job["extranonce2_size"])
                     mask = (1 << (8 * extranonce2_size)) - 1
                     extranonce2 = (time.time_ns() & mask).to_bytes(
                         extranonce2_size, "big"
@@ -1109,7 +1121,7 @@ def miner_loop():
                 hit, found, hashes = native_engine_poll(engine)
                 # Preserve a hit even if its final nonce chunk also exhausts the nonce space.
                 if native_engine_exhausted(engine) and not hit:
-                    extranonce2_size = int(ctx.upstream_extranonce2_size)
+                    extranonce2_size = int(current_job["extranonce2_size"])
                     mask = (1 << (8 * extranonce2_size)) - 1
                     extranonce2 = (time.time_ns() & mask).to_bytes(
                         extranonce2_size, "big"
