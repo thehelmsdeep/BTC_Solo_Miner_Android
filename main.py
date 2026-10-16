@@ -1159,14 +1159,14 @@ def miner_loop():
                     print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                           "==============================================================")
                     print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                          "  !!! VALID BLOCK HEADER FOUND !!!")
+                          "  POW CANDIDATE DETECTED; VERIFYING")
                     print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                           "  job=%s | nonce=%08x | nbits=%s" %
                           (current_job["job_id"], found, current_job["nbits"]))
                     print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                           "==============================================================")
                     print(Style.RESET_ALL)
-                    logg("[!!!] VALID BLOCK HEADER FOUND: job=%s nonce=%08x nbits=%s" %
+                    logg("[!] POW candidate detected; independent verification pending: job=%s nonce=%08x nbits=%s" %
                          (current_job["job_id"], found, current_job["nbits"]))
                     # Re-hash the exact header used by native before any network submit.
                     found_snapshot = dict(current_job)
@@ -1183,6 +1183,13 @@ def miner_loop():
                                       job_id=found_snapshot["job_id"], nonce="%08x" % found,
                                       target_hex="%064x" % found_snapshot["target"])
                         else:
+                            logg("[+] SHA256d/target verification PASSED: job=%s nonce=%08x wallet=%s" %
+                                 (found_snapshot["job_id"], found, ADDRESS))
+                            structured_logger.event(
+                                "pow_candidate_verified", engine="native",
+                                job_id=found_snapshot["job_id"], nonce="%08x" % found,
+                                wallet=ADDRESS, target_hex="%064x" % found_snapshot["target"],
+                            )
                             debug_log("Target verification passed", engine="native",
                                       job_id=found_snapshot["job_id"], nonce="%08x" % found,
                                       target_hex="%064x" % found_snapshot["target"])
@@ -1318,14 +1325,14 @@ def miner_loop():
                         print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                               "==============================================================")
                         print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                              "  !!! VALID BLOCK HEADER FOUND !!!")
+                              "  POW CANDIDATE DETECTED; VERIFYING")
                         print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                               "  job=%s | nonce=%08x | nbits=%s" %
                               (found_job, nonce, job["nbits"]))
                         print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
                               "==============================================================")
                         print(Style.RESET_ALL)
-                        logg("[!!!] VALID BLOCK HEADER FOUND: job=%s nonce=%08x nbits=%s" %
+                        logg("[!] POW candidate detected; independent verification pending: job=%s nonce=%08x nbits=%s" %
                              (found_job, nonce, job["nbits"]))
 
                         # A notify can race with result_queue delivery. Never
@@ -1348,6 +1355,13 @@ def miner_loop():
                                           job_id=found_job, nonce="%08x" % nonce,
                                           target_hex="%064x" % found_target)
                             else:
+                                logg("[+] SHA256d/target verification PASSED: job=%s nonce=%08x wallet=%s" %
+                                     (found_job, nonce, ADDRESS))
+                                structured_logger.event(
+                                    "pow_candidate_verified", engine="python",
+                                    job_id=found_job, nonce="%08x" % nonce,
+                                    wallet=ADDRESS, target_hex="%064x" % found_target,
+                                )
                                 debug_log("Target verification passed", engine="python",
                                           job_id=found_job, nonce="%08x" % nonce,
                                           target_hex="%064x" % found_target)
