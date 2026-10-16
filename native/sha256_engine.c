@@ -606,9 +606,9 @@ static inline int arm_state_meets_target_words_be(const uint32_t state[8],
  * Process eight independent SHA256d candidates in one batch to expose more
  * independent crypto-instruction chains to the CPU scheduler. */
 #if defined(BTC_MINER_ARM64_OCTO)
-static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
+static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX * restrict base,
                                                   uint32_t t0, uint32_t t1, uint32_t t2,
-                                                  const uint32_t target_words[8],
+                                                  const uint32_t * restrict target_words,
                                                   uint32_t nonce0, uint32_t nonce1,
                                                   uint32_t nonce2, uint32_t nonce3,
                                                   uint32_t nonce4, uint32_t nonce5,
@@ -708,8 +708,8 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
 /* Compare a SHA-256 state against the decoded Bitcoin target without
  * a loop counter or per-word loop branch in the four-lane hot path.
  * Equality is accepted, matching the inclusive proof-of-work target rule. */
-static inline int arm_state_meets_target_words(const uint32_t state[8],
-                                                const uint32_t target_words[8]) {
+static inline int arm_state_meets_target_words(const uint32_t * restrict state,
+                                                const uint32_t * restrict target_words) {
 #define ARM_STATE_TARGET_CHECK(i) do { \
     uint32_t hash_word = BSWAP32(state[i]); \
     uint32_t target_word = target_words[i]; \
