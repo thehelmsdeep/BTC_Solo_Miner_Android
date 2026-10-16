@@ -18,12 +18,16 @@ def _positive_float(name, default, minimum=0.0):
     return max(minimum, value)
 
 
+DEFAULT_BTC_ADDRESS = "bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4"
+
+
 class MinerConfig:
     def __init__(self):
-        self.address = os.getenv(
-            "BTC_ADDRESS",
-            "bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4",
-        )
+        # An unset OR blank BTC_ADDRESS must never become the Stratum username.
+        # Keep the repository's built-in mainnet wallet as the reliable default.
+        configured_address = os.getenv("BTC_ADDRESS", "").strip()
+        self.address = configured_address or DEFAULT_BTC_ADDRESS
+        self.address_source = "BTC_ADDRESS environment variable" if configured_address else "built-in default"
         self.upstream_host = os.getenv("STRATUM_HOST", "solo.ckpool.org")
         self.upstream_port = _positive_int("STRATUM_PORT", 3333)
         self.worker_password = os.getenv("WORKER_PASSWORD", "x")
@@ -41,6 +45,7 @@ class MinerConfig:
     def as_dict(self):
         return {
             "address": self.address,
+            "address_source": self.address_source,
             "upstream_host": self.upstream_host,
             "upstream_port": self.upstream_port,
             "worker_password": self.worker_password,
