@@ -88,7 +88,10 @@ def render_dashboard(rate, interval_hashes=None):
     print(Fore.BLUE + "============== CPU Solo Miner ==============" + Style.RESET_ALL)
     print("Wallet       : " + ADDRESS)
     print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
-    print("Hashrate     : %.6f MH/s" % (rate / 1_000_000))
+    print("Hashrate     : %s H/s (%s MH/s)" % (
+        format(rate, ",.0f"),
+        format(rate / 1_000_000, ",.6f"),
+    ))
     if interval_hashes is not None:
         print("Interval Hash: %d" % interval_hashes)
     print("Total Hashes : %d" % ctx.total_hashes)
@@ -99,9 +102,19 @@ def render_dashboard(rate, interval_hashes=None):
     print("Last Job     : %s" % (ctx.job_id or "none"))
     snapshot = structured_logger.dashboard_snapshot()
     print("Bug Count    : %d" % snapshot["error_count"])
-    print("Last Bug     : %s" % snapshot["last_error"])
+    print("Bugs (all recorded):")
+    if snapshot["errors"]:
+        for index, message in enumerate(snapshot["errors"], 1):
+            print("  %d. %s" % (index, message))
+    else:
+        print("  None")
     print("Warning Count: %d" % snapshot["warning_count"])
-    print("Last Warning : %s" % snapshot["last_warning"])
+    print("Warnings (all recorded):")
+    if snapshot["warnings"]:
+        for index, message in enumerate(snapshot["warnings"], 1):
+            print("  %d. %s" % (index, message))
+    else:
+        print("  None")
     print("Mining Time  : %s" % snapshot["mining_duration"])
     print("Debug Log    : miner-debug.log")
     print("Event Log    : %s" % structured_logger.event_path)
