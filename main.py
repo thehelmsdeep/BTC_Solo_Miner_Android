@@ -954,11 +954,23 @@ def connect_upstream():
                 if not isinstance(result, list) or len(result) != 3:
                     raise RuntimeError("Invalid mining.subscribe response")
 
-                (
-                    ctx.sub_details,
-                    ctx.upstream_extranonce1,
-                    ctx.upstream_extranonce2_size,
-                ) = result
+                sub_details, extranonce1, extranonce2_size = result
+                if not isinstance(sub_details, list):
+                    raise RuntimeError("Invalid mining.subscribe subscription details")
+                _validate_hex_blob(extranonce1, "subscribe extranonce1")
+                if isinstance(extranonce2_size, bool):
+                    raise RuntimeError("Invalid mining.subscribe extranonce2_size")
+                try:
+                    extranonce2_size = int(extranonce2_size)
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Invalid mining.subscribe extranonce2_size") from exc
+                if not 1 <= extranonce2_size <= 32:
+                    raise RuntimeError("Invalid mining.subscribe extranonce2_size")
+                with ctx.job_lock:
+                    ctx.sub_details = sub_details
+                    ctx.upstream_extranonce1 = extranonce1
+                    ctx.upstream_extranonce2_size = extranonce2_size
+                    ctx.job_generation += 1
                 subscribed = True
                 print(Fore.GREEN, "[*] Stratum subscribe successful")
                 logg("[*] Stratum subscribe successful: extranonce2_size=%s" % ctx.upstream_extranonce2_size)
