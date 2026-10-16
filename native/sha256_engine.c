@@ -1152,6 +1152,11 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             sha256_8_hashes(&base,tail0,tail1,tail2,nonces,target_words,hits);
             local += 8;
             for(int lane=0;lane<8;lane++) if(hits[lane]){
+                /* SIMD hit masks are only candidates. Confirm with the scalar
+                 * fast path before publishing a nonce; this prevents a vector
+                 * comparison/endianness mismatch from becoming a false PoW hit. */
+                if (!hash_nonce_fast(&base, tail0, tail1, tail2, target, nonces[lane]))
+                    continue;
                 engine_lock(e);
                 if(!e->found_valid &&
                    !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) &&
@@ -1178,6 +1183,9 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             sha256_4_hashes(&base,tail0,tail1,tail2,nonces,target_words,hits);
             local += 4;
             for (int lane=0;lane<4;lane++) if (hits[lane]) {
+                /* Treat SIMD results as candidates and verify with scalar logic. */
+                if (!hash_nonce_fast(&base, tail0, tail1, tail2, target, nonces[lane]))
+                    continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
