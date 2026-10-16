@@ -582,6 +582,26 @@ static inline unsigned hash_nonce_arm_pair_words(const SHA256_CTX *base,
 /* Forward declaration: the fixed-word target comparator is defined below. */
 static inline int arm_state_meets_target_words(const uint32_t state[8], const uint32_t target_words[8]);
 
+/* Compare against a target whose words were byte-swapped once per OCTO batch.
+ * This removes eight REV/BSWAP operations from every candidate's final compare. */
+static inline int arm_state_meets_target_words_be(const uint32_t state[8],
+                                                   const uint32_t target_be[8]) {
+#define ARM_STATE_TARGET_BE_CHECK(i) do { \
+    if (state[i] < target_be[i]) return 1; \
+    if (state[i] > target_be[i]) return 0; \
+} while (0)
+    ARM_STATE_TARGET_BE_CHECK(7);
+    ARM_STATE_TARGET_BE_CHECK(6);
+    ARM_STATE_TARGET_BE_CHECK(5);
+    ARM_STATE_TARGET_BE_CHECK(4);
+    ARM_STATE_TARGET_BE_CHECK(3);
+    ARM_STATE_TARGET_BE_CHECK(2);
+    ARM_STATE_TARGET_BE_CHECK(1);
+    ARM_STATE_TARGET_BE_CHECK(0);
+#undef ARM_STATE_TARGET_BE_CHECK
+    return 1;
+}
+
 /* Eight-nonce staged pipeline for ARM64 SHA2.
  * Process eight independent SHA256d candidates in one batch to expose more
  * independent crypto-instruction chains to the CPU scheduler. */
@@ -596,7 +616,7 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
     /* Cache-line alignment keeps each lane's message schedule and state
      * naturally aligned for the ARM NEON/SHA2 load-store sequence. */
     uint32_t first_blocks[8][16] __attribute__((aligned(64)));
-    uint32_t states[8][8] __attribute__((aligned(64)));
+    uint32_t states[8][8] __attribute__((aligned(64)));\n    uint32_t target_be[8];\n    for (int i = 0; i < 8; ++i) target_be[i] = BSWAP32(target_words[i]);
     static const uint32_t IV[8] = {
         0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
         0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
@@ -671,7 +691,7 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
     arm_sha256_compress(states[7], first_blocks[7]);
 
     unsigned hits = 0;
-    if (arm_state_meets_target_words(states[0], target_words)) hits |= 1U << 0;
+    if (arm_state_meets_target_words_be(states[0], target_be)) hits |= 1U << 0;
     if (arm_state_meets_target_words(states[1], target_words)) hits |= 1U << 1;
     if (arm_state_meets_target_words(states[2], target_words)) hits |= 1U << 2;
     if (arm_state_meets_target_words(states[3], target_words)) hits |= 1U << 3;
