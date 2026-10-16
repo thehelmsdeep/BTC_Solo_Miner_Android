@@ -21,12 +21,95 @@ def _positive_float(name, default, minimum=0.0):
 DEFAULT_BTC_ADDRESS = "bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4"
 
 
+def _bech32_polymod(values):
+    generators = (0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3)
+    checksum = 1
+    for value in values:
+        top = checksum >> 25
+        checksum = ((checksum & 0x1FFFFFF) << 5) ^ value
+        for bit, generator in enumerate(generators):
+            if (top >> bit) & 1:
+                checksum ^= generator
+    return checksum
+
+
+def _valid_segwit_address(address):
+    if not isinstance(address, str) or not address or len(address) > 90:
+        return False
+    if address.lower() != address and address.upper() != address:
+        return False
+    address = address.lower()
+    separator = address.rfind("1")
+    if separator < 1 or separator + 7 > len(address):
+        return False
+    hrp = address[:separator]
+    if hrp != "bc":
+        return False
+    alphabet = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+    try:
+        data = [alphabet.index(char) for char in address[separator + 1:]]
+    except ValueError:
+        return False
+    expanded_hrp = [ord(char) >> 5 for char in hrp] + [0] + [ord(char) & 31 for char in hrp]
+    checksum = _bech32_polymod(expanded_hrp + data)
+    if checksum not in (1, 0x2BC830A3):
+        return False
+    payload = data[:-6]
+    if not payload or payload[0] > 16:
+        return False
+    witness_version = payload[0]
+    acc = 0
+    bits = 0
+    program = []
+    for value in payload[1:]:
+        acc = (acc << 5) | value
+        bits += 5
+        while bits >= 8:
+            bits -= 8
+            program.append((acc >> bits) & 0xFF)
+    if bits >= 5 or ((acc << (8 - bits)) & 0xFF):
+        return False
+    if not 2 <= len(program) <= 40:
+        return False
+    if witness_version == 0 and (checksum != 1 or len(program) not in (20, 32)):
+        return False
+    if witness_version != 0 and checksum != 0x2BC830A3:
+        return False
+    return True
+
+
+def _valid_base58_address(address):
+    alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+    if not isinstance(address, str) or not 26 <= len(address) <= 35:
+        return False
+    number = 0
+    try:
+        for char in address:
+            number = number * 58 + alphabet.index(char)
+    except ValueError:
+        return False
+    raw = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    raw = b"\\x00" * (len(address) - len(address.lstrip("1"))) + raw
+    if len(raw) != 25 or raw[0] not in (0, 5):
+        return False
+    import hashlib
+    checksum = hashlib.sha256(hashlib.sha256(raw[:-4]).digest()).digest()[:4]
+    return checksum == raw[-4:]
+
+
+def validate_btc_address(address):
+    """Accept only checksum-valid Bitcoin mainnet Base58Check or SegWit addresses."""
+    if _valid_segwit_address(address) or _valid_base58_address(address):
+        return address
+    raise ValueError("Invalid Bitcoin mainnet address (format/checksum); check BTC_ADDRESS")
+
+
 class MinerConfig:
     def __init__(self):
         # An unset OR blank BTC_ADDRESS must never become the Stratum username.
         # Keep the repository's built-in mainnet wallet as the reliable default.
         configured_address = os.getenv("BTC_ADDRESS", "").strip()
-        self.address = configured_address or DEFAULT_BTC_ADDRESS
+        self.address = validate_btc_address(configured_address or DEFAULT_BTC_ADDRESS)
         self.address_source = "BTC_ADDRESS environment variable" if configured_address else "built-in default"
         self.upstream_host = os.getenv("STRATUM_HOST", "stratum.ckpool.org")
         self.upstream_port = _positive_int("STRATUM_PORT", 3333)
