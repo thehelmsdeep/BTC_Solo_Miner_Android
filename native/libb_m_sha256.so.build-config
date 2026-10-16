@@ -1,0 +1,11 @@
+/data/data/com.termux/files/usr/bin/clang-21
+-O3
+-mcpu=native
+-flto
+-funroll-loops
+-fomit-frame-pointer
+-DNDEBUG
+-fPIC
+-shared
+-DBTC_MINER_ARM64_QUAD
+/data/data/com.termux/files/home/BTC_Solo_Miner_Android/native/sha256_engine.c

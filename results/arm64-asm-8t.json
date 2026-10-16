@@ -1,0 +1,131 @@
+{
+  "schema": "stage4-performance-v1",
+  "timestamp_utc": "2026-10-15T18:57:51Z",
+  "benchmark": {
+    "duration_s": 15.0,
+    "repeats": 3,
+    "threads": [
+      8
+    ],
+    "target": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sustained_s": 60.0
+  },
+  "system": {
+    "machine": "aarch64",
+    "system": "Android",
+    "release": "16",
+    "python": "3.13.13",
+    "logical_cpus": 8,
+    "cpu0_freq_khz": 2000000
+  },
+  "thermal": [],
+  "results": [
+    {
+      "threads": 8,
+      "repeats": 3,
+      "median_hps": 35974794.03519026,
+      "min_hps": 33914748.809252165,
+      "max_hps": 41574005.63399101,
+      "runs": [
+        {
+          "threads": 8,
+          "hashes": 509378560,
+          "elapsed_s": 15.019382,
+          "hashrate_hps": 33914748.809252165,
+          "cpu_before": {
+            "machine": "aarch64",
+            "system": "Android",
+            "release": "16",
+            "python": "3.13.13",
+            "logical_cpus": 8,
+            "cpu0_freq_khz": 2000000
+          },
+          "cpu_after": {
+            "machine": "aarch64",
+            "system": "Android",
+            "release": "16",
+            "python": "3.13.13",
+            "logical_cpus": 8,
+            "cpu0_freq_khz": 2000000
+          },
+          "thermal_before": [],
+          "thermal_after": []
+        },
+        {
+          "threads": 8,
+          "hashes": 540098560,
+          "elapsed_s": 15.01325,
+          "hashrate_hps": 35974794.03519026,
+          "cpu_before": {
+            "machine": "aarch64",
+            "system": "Android",
+            "release": "16",
+            "python": "3.13.13",
+            "logical_cpus": 8,
+            "cpu0_freq_khz": 2000000
+          },
+          "cpu_after": {
+            "machine": "aarch64",
+            "system": "Android",
+            "release": "16",
+            "python": "3.13.13",
+            "logical_cpus": 8,
+            "cpu0_freq_khz": 2000000
+          },
+          "thermal_before": [],
+          "thermal_after": []
+        },
+        {
+          "threads": 8,
+          "hashes": 624410624,
+          "elapsed_s": 15.019256,
+          "hashrate_hps": 41574005.63399101,
+          "cpu_before": {
+            "machine": "aarch64",
+            "system": "Android",
+            "release": "16",
+            "python": "3.13.13",
+            "logical_cpus": 8,
+            "cpu0_freq_khz": 2000000
+          },
+          "cpu_after": {
+            "machine": "aarch64",
+            "system": "Android",
+            "release": "16",
+            "python": "3.13.13",
+            "logical_cpus": 8,
+            "cpu0_freq_khz": 2000000
+          },
+          "thermal_before": [],
+          "thermal_after": []
+        }
+      ],
+      "speedup_vs_1t": 1.0,
+      "scaling_efficiency_pct": 12.5
+    }
+  ],
+  "sustained": {
+    "threads": 8,
+    "duration_s": 60.015775,
+    "hashes": 2491285504,
+    "hashrate_hps": 41510511.206082076,
+    "cpu_before": {
+      "machine": "aarch64",
+      "system": "Android",
+      "release": "16",
+      "python": "3.13.13",
+      "logical_cpus": 8,
+      "cpu0_freq_khz": 2000000
+    },
+    "cpu_after": {
+      "machine": "aarch64",
+      "system": "Android",
+      "release": "16",
+      "python": "3.13.13",
+      "logical_cpus": 8,
+      "cpu0_freq_khz": 2000000
+    },
+    "thermal_before": [],
+    "thermal_after": []
+  }
+}
