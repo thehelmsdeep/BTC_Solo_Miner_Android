@@ -349,7 +349,7 @@ static void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     b_m_arm_sha256_compress_asm(h, w, K);
 }
 #else
-static inline __attribute__((always_inline)) void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
+static inline __attribute__((always_inline)) void arm_sha256_compress(uint32_t * restrict h, const uint32_t * restrict w) {
     uint32x4_t STATE0 = vld1q_u32(&h[0]);
     uint32x4_t STATE1 = vld1q_u32(&h[4]);
     uint32x4_t ABEF_SAVE = STATE0;
@@ -580,8 +580,10 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX *base,
                                                   uint32_t nonce2, uint32_t nonce3,
                                                   uint32_t nonce4, uint32_t nonce5,
                                                   uint32_t nonce6, uint32_t nonce7) {
-    uint32_t first_blocks[8][16];
-    uint32_t states[8][8];
+    /* Cache-line alignment keeps each lane's message schedule and state
+     * naturally aligned for the ARM NEON/SHA2 load-store sequence. */
+    uint32_t first_blocks[8][16] __attribute__((aligned(64)));
+    uint32_t states[8][8] __attribute__((aligned(64)));
     static const uint32_t IV[8] = {
         0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53AU,
         0x510e527fU, 0x9b05688CU, 0x1f83d9abU, 0x5be0cd19U
