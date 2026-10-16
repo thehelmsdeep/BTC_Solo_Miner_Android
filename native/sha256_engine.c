@@ -35,8 +35,19 @@ static inline uint32_t BSWAP32(uint32_t x){
 #endif
 }
 
+/* Route compression through ARMv8 SHA2 instructions when the target supports them.
+ * This declaration lets the fixed-header SHA-256d nonce kernel use the
+ * accelerated compressor for both SHA-256 passes. */
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+static void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]);
+#endif
+
 /* SHA-256 compression for already-decoded big-endian message words. */
 static inline void transform_words(SHA256_CTX * restrict c,const uint32_t in[16]){
+#if defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+ arm_sha256_compress(c->h,in);
+ return;
+#endif
  /* A 16-word circular schedule is sufficient for SHA-256. Reusing it
   * cuts the schedule stack footprint from 256 bytes to 64 bytes and avoids
   * writing/reading the expanded 64-word array in the generic C path. */
@@ -334,11 +345,11 @@ static inline void sha256_8_hashes(const SHA256_CTX *base,
 #if defined(BTC_MINER_ARM64_ASM)
 extern void b_m_arm_sha256_compress_asm(uint32_t h[8], const uint32_t w[16],
                                         const uint32_t k[64]);
-static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
+static void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     b_m_arm_sha256_compress_asm(h, w, K);
 }
 #else
-static inline void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
+static void arm_sha256_compress(uint32_t h[8], const uint32_t w[16]) {
     uint32x4_t STATE0 = vld1q_u32(&h[0]);
     uint32x4_t STATE1 = vld1q_u32(&h[4]);
     uint32x4_t ABEF_SAVE = STATE0;
