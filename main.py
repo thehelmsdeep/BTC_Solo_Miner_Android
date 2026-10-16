@@ -88,13 +88,10 @@ def render_dashboard(rate, interval_hashes=None):
     print(Fore.BLUE + "============== CPU Solo Miner ==============" + Style.RESET_ALL)
     print("Wallet       : " + ADDRESS)
     print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
-    print("Hashrate     : %s H/s (%s MH/s)" % (
-        format(rate, ",.0f"),
-        format(rate / 1_000_000, ",.6f"),
-    ))
+    print("Hashrate     : %s MH/s" % format(rate / 1_000_000, ",.6f"))
     if interval_hashes is not None:
-        print("Interval Hash: %d" % interval_hashes)
-    print("Total Hashes : %d" % ctx.total_hashes)
+        print("Interval Hash: %s" % format(interval_hashes, ","))
+    print("Total Hashes : %s" % format(ctx.total_hashes, ","))
     print("Submitted    : %d" % ctx.shares_submitted)
     print("Accepted     : %d" % ctx.shares_accepted)
     print("Rejected     : %d" % ctx.shares_rejected)
