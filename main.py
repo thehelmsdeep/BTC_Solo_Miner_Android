@@ -74,7 +74,6 @@ def debug_log(message, **fields):
     """
     message = str(message)
     structured_logger.debug(message, **fields)
-    structured_logger.event("debug", message=message, **fields)
     if message in ("Stratum handshake timeout", "Connection/session failure"):
         return
     severity = structured_logger.classify_issue(message)
