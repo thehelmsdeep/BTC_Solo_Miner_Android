@@ -1002,13 +1002,16 @@ def connect_upstream():
     debug_log("Connection attempt", host=UPSTREAM_HOST, port=UPSTREAM_PORT,
               wallet=ADDRESS, reconnect_delay=RECONNECT_DELAY)
     sock = socket.create_connection((UPSTREAM_HOST, UPSTREAM_PORT), timeout=20)
-    sock.settimeout(5)
+    # Pools may accept TCP promptly but take longer to answer the Stratum
+    # handshake. Keep recv timeouts short enough for periodic wakeups, while
+    # giving subscribe + authorize a bounded 60-second overall deadline.
+    sock.settimeout(10)
     ctx.upstream_sock = sock
 
     print(Fore.GREEN, "[*] Connected to %s:%s" %
           (UPSTREAM_HOST, UPSTREAM_PORT))
     debug_log("Connection established", host=UPSTREAM_HOST, port=UPSTREAM_PORT,
-              socket_timeout=5)
+              socket_timeout=10, handshake_timeout=60)
     logg("[*] Connected to upstream %s:%s" % (UPSTREAM_HOST, UPSTREAM_PORT))
 
     send_json(sock, {
@@ -1020,9 +1023,10 @@ def connect_upstream():
     buffer = b""
     subscribed = False
     authorized = False
-    deadline = time.time() + 30
+    handshake_started = time.monotonic()
+    deadline = handshake_started + 60
 
-    while time.time() < deadline and not authorized:
+    while time.monotonic() < deadline and not authorized:
         try:
             chunk = sock.recv(8192)
         except socket.timeout:
@@ -1111,10 +1115,17 @@ def connect_upstream():
                     ctx.upstream_extranonce2_size = size
                     ctx.job_generation += 1
 
+    handshake_elapsed = round(time.monotonic() - handshake_started, 3)
     if not subscribed:
-        raise TimeoutError("Upstream subscribe timed out")
+        debug_log("Stratum handshake timeout", phase="subscribe",
+                  elapsed_seconds=handshake_elapsed, timeout_seconds=60,
+                  host=UPSTREAM_HOST, port=UPSTREAM_PORT)
+        raise TimeoutError("Upstream subscribe timed out after 60 seconds")
     if not authorized:
-        raise TimeoutError("Upstream authorization timed out")
+        debug_log("Stratum handshake timeout", phase="authorize",
+                  elapsed_seconds=handshake_elapsed, timeout_seconds=60,
+                  host=UPSTREAM_HOST, port=UPSTREAM_PORT)
+        raise TimeoutError("Upstream authorization timed out after 60 seconds")
 
     ctx.connected = True
     ctx.upstream_alive = True
