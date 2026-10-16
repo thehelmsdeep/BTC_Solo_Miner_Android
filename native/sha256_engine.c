@@ -1150,7 +1150,10 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             local += 8;
             for(int lane=0;lane<8;lane++) if(hits[lane]){
                 engine_lock(e);
-                if(!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED)){
+                if(!e->found_valid &&
+                   !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) &&
+                   !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) &&
+                   __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation){
                     e->found_valid=1;e->found_nonce=nonces[lane];__atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
                 }
                 engine_unlock(e);
