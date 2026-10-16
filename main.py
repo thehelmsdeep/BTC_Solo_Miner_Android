@@ -64,13 +64,22 @@ def logg(msg):
 
 
 def debug_log(message, **fields):
-    """Write diagnostic details to the rotating debug log and JSONL event log."""
-    structured_logger.debug(str(message), **fields)
-    issue_text = "%s %s" % (message, json.dumps(fields, sort_keys=True, default=str))
-    severity = structured_logger.classify_issue(issue_text)
+    """Write diagnostics; count issues from the primary log message only.
+
+    Connection setup metadata may contain words such as "timeout" in a
+    configured deadline, which must not turn a successful connection into a
+    warning. Handshake-timeout and session-failure records are diagnostic
+    details for the exception already counted by logg(), so do not count them
+    again.
+    """
+    message = str(message)
+    structured_logger.debug(message, **fields)
+    structured_logger.event("debug", message=message, **fields)
+    if message in ("Stratum handshake timeout", "Connection/session failure"):
+        return
+    severity = structured_logger.classify_issue(message)
     if severity:
-        structured_logger.report_issue("%s | %s" % (message, json.dumps(fields, sort_keys=True, default=str)),
-                                       source="debug_log")
+        structured_logger.report_issue(message, source="debug_log")
 
 
 def render_dashboard(rate, interval_hashes=None):
