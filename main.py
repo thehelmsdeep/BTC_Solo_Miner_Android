@@ -202,13 +202,12 @@ def ensure_native():
         source_files.append(asm_file)
         flags = [*flags, "-DBTC_MINER_ARM64_ASM"]
 
-    # ARM64 SHA2 batch modes are opt-in/selectable for device benchmarks.
-    # OCTO takes precedence when enabled; otherwise QUAD remains the default.
-    # Set BTC_MINER_ARM64_OCTO=1 to test the eight-nonce staged pipeline,
-    # or BTC_MINER_ARM64_QUAD=0 to test the non-batched ARM64 path.
+    # Prefer the eight-nonce staged ARMv8 SHA2 pipeline on ARM64 by default.
+    # Explicit environment settings can still select OCTO, QUAD, or scalar-pair mode.
+    # CPU thread count remains controlled independently by CPU_THREADS.
     # The native correctness self-tests run before the engine is used.
-    octo_setting = os.getenv("BTC_MINER_ARM64_OCTO", "0").strip().lower()
-    quad_setting = os.getenv("BTC_MINER_ARM64_QUAD", "1").strip().lower()
+    octo_setting = os.getenv("BTC_MINER_ARM64_OCTO", "1").strip().lower()
+    quad_setting = os.getenv("BTC_MINER_ARM64_QUAD", "0").strip().lower()
     arm64_crypto_build = (
         os.name != "nt"
         and machine in ("aarch64", "arm64")
