@@ -54,8 +54,10 @@ def timer():
 def logg(msg):
     """Compatibility logging API backed by human + JSONL event logs."""
     text = str(msg)
-    if text.startswith("[!]") or " error:" in text.lower() or " failed" in text.lower():
-        structured_logger.record_error(text)
+    severity = structured_logger.classify_issue(text)
+    if severity:
+        structured_logger.report_issue(text)
+        structured_logger.event("log", severity=severity, message=text)
     else:
         structured_logger.log(text)
         structured_logger.event("log", message=text)
@@ -64,6 +66,11 @@ def logg(msg):
 def debug_log(message, **fields):
     """Write diagnostic details to the rotating debug log and JSONL event log."""
     structured_logger.debug(str(message), **fields)
+    issue_text = "%s %s" % (message, json.dumps(fields, sort_keys=True, default=str))
+    severity = structured_logger.classify_issue(issue_text)
+    if severity:
+        structured_logger.report_issue("%s | %s" % (message, json.dumps(fields, sort_keys=True, default=str)),
+                                       source="debug_log")
 
 
 def render_dashboard(rate, interval_hashes=None):
@@ -85,6 +92,8 @@ def render_dashboard(rate, interval_hashes=None):
     snapshot = structured_logger.dashboard_snapshot()
     print("Bug Count    : %d" % snapshot["error_count"])
     print("Last Bug     : %s" % snapshot["last_error"])
+    print("Warning Count: %d" % snapshot["warning_count"])
+    print("Last Warning : %s" % snapshot["last_warning"])
     print("Mining Time  : %s" % snapshot["mining_duration"])
     print("Debug Log    : miner-debug.log")
     print("Event Log    : %s" % structured_logger.event_path)
@@ -177,12 +186,16 @@ def ensure_native():
     else:
         compiler = shutil.which(requested_cc)
     if not compiler:
-        print(Fore.YELLOW, f"[!] C compiler {requested_cc!r} unavailable; using Python SHA256 fallback")
+        message = f"[!] C compiler {requested_cc!r} unavailable; using Python SHA256 fallback"
+        print(Fore.YELLOW, message)
+        logg(message)
         return None
 
     cpu_tune = os.getenv("BTC_MINER_CPU_TUNE", "native").strip().lower()
     if cpu_tune not in ("generic", "native"):
-        print(Fore.YELLOW, "[!] BTC_MINER_CPU_TUNE must be 'generic' or 'native'; using generic")
+        message = "[!] BTC_MINER_CPU_TUNE must be 'generic' or 'native'; using generic"
+        print(Fore.YELLOW, message)
+        logg(message)
         cpu_tune = "generic"
 
     if os.name == "nt":
@@ -255,7 +268,9 @@ def ensure_native():
             print(Fore.GREEN, f"[*] Native SHA256 engine built with {pathlib.Path(compiler).name}: {' '.join(flags)}")
         except (OSError, subprocess.CalledProcessError) as exc:
             detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
-            print(Fore.YELLOW, "[!] Native build unavailable; using Python fallback:", detail)
+            message = "[!] Native build unavailable; using Python fallback: %s" % detail
+            print(Fore.YELLOW, message)
+            logg(message)
             return None
     try:
         lib=ctypes.CDLL(str(NATIVE_LIB))
@@ -1245,7 +1260,9 @@ def miner_loop():
                     current_job["header_prefix"] = header_prefix
                     current_job["target"] = target
 
-                    print(Fore.YELLOW, "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job")
+                    message = "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job"
+                    print(Fore.YELLOW, message)
+                    logg(message)
                     continue
 
                 if hit:
@@ -1475,15 +1492,18 @@ def miner_loop():
                                 )
                         except Exception as exc:
                             print(Fore.RED, "[!] Share submit failed:", exc)
+                            logg("[!] Share submit failed: %s" % exc)
                         break
 
                     elif event[0] == "error":
                         print(Fore.RED, "[!] CPU worker error:", event[2])
+                        logg("[!] CPU worker error: %s" % event[2])
                         debug_log("Worker error", worker_id=event[1], job_id=job["job_id"], error=event[2])
 
             except queue.Empty:
                 pass
             except Exception as exc:
+                logg("[!] Worker result queue read failed: %s" % exc)
                 debug_log("Worker result queue read failed", job_id=job["job_id"], error=repr(exc))
 
             if stop_event.is_set():
