@@ -46,6 +46,20 @@ structured_logger = StructuredLogger(
     event_path=os.getenv("MINER_EVENT_LOG", "miner-events.jsonl")
 )
 
+# Share telemetry for the live dashboard (runtime session).
+share_stats_lock = threading.Lock()
+share_stats = {
+    "last_submit_at": None,
+    "last_result": "none",
+    "last_result_at": None,
+    "last_error": "",
+    "latency_total": 0.0,
+    "latency_count": 0,
+    "latency_max": 0.0,
+    "first_submit_at": None,
+    "submit_times": [],
+}
+
 
 def timer():
     return datetime.now().time()
@@ -92,9 +106,40 @@ def render_dashboard(rate, interval_hashes=None):
     if interval_hashes is not None:
         print("Interval Hash: %s" % format(interval_hashes, ","))
     print("Total Hashes : %s" % format(ctx.total_hashes, ","))
-    print("Submitted    : %d" % ctx.shares_submitted)
-    print("Accepted     : %d" % ctx.shares_accepted)
-    print("Rejected     : %d" % ctx.shares_rejected)
+    now_mono = time.monotonic()
+    with share_stats_lock:
+        submit_times = [stamp for stamp in share_stats["submit_times"] if now_mono - stamp <= 60.0]
+        share_stats["submit_times"] = submit_times
+        last_submit_at = share_stats["last_submit_at"]
+        last_result = share_stats["last_result"]
+        last_result_at = share_stats["last_result_at"]
+        last_error = share_stats["last_error"]
+        latency_count = share_stats["latency_count"]
+        latency_total = share_stats["latency_total"]
+        latency_max = share_stats["latency_max"]
+        first_submit_at = share_stats["first_submit_at"]
+    with ctx.pending_submits_lock:
+        pending_count = len(ctx.pending_submits)
+    resolved = ctx.shares_accepted + ctx.shares_rejected
+    acceptance_rate = (100.0 * ctx.shares_accepted / resolved) if resolved else 0.0
+    rejection_rate = (100.0 * ctx.shares_rejected / resolved) if resolved else 0.0
+    average_latency = latency_total / latency_count if latency_count else 0.0
+    submit_age = now_mono - last_submit_at if last_submit_at is not None else None
+    result_age = now_mono - last_result_at if last_result_at is not None else None
+    submit_elapsed = max(now_mono - first_submit_at, 1.0) if first_submit_at is not None else 0.0
+    submit_per_min = ctx.shares_submitted * 60.0 / submit_elapsed if submit_elapsed else 0.0
+
+    print("Submitted    : %s" % format(ctx.shares_submitted, ","))
+    print("Accepted     : %s" % format(ctx.shares_accepted, ","))
+    print("Rejected     : %s" % format(ctx.shares_rejected, ","))
+    print("Pending      : %s" % format(pending_count, ","))
+    print("Acceptance   : %.2f%%" % acceptance_rate)
+    print("Rejection    : %.2f%%" % rejection_rate)
+    print("Shares/min   : %.2f (session average)" % submit_per_min)
+    print("Last Submit  : %s" % ("never" if submit_age is None else "%.1fs ago" % submit_age))
+    print("Last Result  : %s%s" % (last_result, (" | " + last_error) if last_error else ""))
+    print("Result Age   : %s" % ("never" if result_age is None else "%.1fs ago" % result_age))
+    print("Share Latency: avg %.3fs | max %.3fs" % (average_latency, latency_max))
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
     snapshot = structured_logger.dashboard_snapshot()
@@ -763,6 +808,12 @@ def submit_share(job_id, extranonce2, ntime, nonce, expected_generation=None):
 
     ctx.shares_submitted += 1
     metrics.share_submitted()
+    submitted_at = time.monotonic()
+    with share_stats_lock:
+        share_stats["last_submit_at"] = submitted_at
+        if share_stats["first_submit_at"] is None:
+            share_stats["first_submit_at"] = submitted_at
+        share_stats["submit_times"].append(submitted_at)
     logg("[*] Share submitted: id=%s job=%s nonce=%08x" %
          (submit_id, job_id, nonce))
     structured_logger.event(
@@ -864,6 +915,14 @@ def upstream_listener(sock):
                                 metrics.share_result(False)
 
                             elapsed = time.monotonic() - submitted_at
+                            with share_stats_lock:
+                                share_stats["last_result"] = "ACCEPTED" if accepted else "REJECTED"
+                                share_stats["last_result_at"] = time.monotonic()
+                                error_value = msg.get("error")
+                                share_stats["last_error"] = "" if accepted else str(error_value or "Pool rejected share")
+                                share_stats["latency_total"] += elapsed
+                                share_stats["latency_count"] += 1
+                                share_stats["latency_max"] = max(share_stats["latency_max"], elapsed)
                             if accepted:
                                 print(
                                     Style.BRIGHT + Fore.WHITE + Back.GREEN,
