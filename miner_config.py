@@ -89,7 +89,7 @@ def _valid_base58_address(address):
     except ValueError:
         return False
     raw = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
-    raw = b"\\x00" * (len(address) - len(address.lstrip("1"))) + raw
+    raw = bytes(len(address) - len(address.lstrip("1"))) + raw
     if len(raw) != 25 or raw[0] not in (0, 5):
         return False
     import hashlib
