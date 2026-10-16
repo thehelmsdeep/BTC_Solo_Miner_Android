@@ -747,10 +747,21 @@ def upstream_listener(sock):
                             print(Fore.RED, "[!] Invalid extranonce update ignored:", exc)
                             continue
                         with ctx.job_lock:
+                            # A new extranonce changes the coinbase and Merkle root.
+                            # Invalidate the old job until a matching notify arrives.
+                            ctx.job_id = None
+                            ctx.prevhash = None
+                            ctx.coinb1 = None
+                            ctx.coinb2 = None
+                            ctx.merkle_branch = None
+                            ctx.version = None
+                            ctx.nbits = None
+                            ctx.ntime = None
+                            ctx.clean_jobs = False
                             ctx.upstream_extranonce1 = params[0]
                             ctx.upstream_extranonce2_size = size
                             ctx.job_generation += 1
-                        print(Fore.CYAN, "[*] Pool extranonce updated")
+                        print(Fore.CYAN, "[*] Pool extranonce updated; waiting for a fresh job")
                         debug_log(
                             "Pool extranonce updated",
                             extranonce1_length=len(params[0]),
@@ -833,22 +844,28 @@ def upstream_listener(sock):
             expire_pending_submits(force=True)
 
 def expire_pending_submits(force=False):
+    """Retire unanswered submissions without misclassifying them as rejects."""
     now = time.monotonic()
     expired = []
 
     with ctx.pending_submits_lock:
         for submit_id, submitted_at in list(ctx.pending_submits.items()):
             if force or now - submitted_at > SUBMIT_TIMEOUT:
-                expired.append(submit_id)
+                expired.append((submit_id, submitted_at))
                 del ctx.pending_submits[submit_id]
 
-    for submit_id in expired:
-        ctx.shares_rejected += 1
-        metrics.share_result(False)
-        print(Fore.RED, "[!] Share response timeout:", submit_id)
-        logg("[!] Share response timeout: id=%s after %.1fs" % (submit_id, SUBMIT_TIMEOUT))
-        structured_logger.event("share_timeout", submit_id=submit_id, timeout_seconds=SUBMIT_TIMEOUT)
-        debug_log("Share response timeout", submit_id=submit_id, timeout_seconds=SUBMIT_TIMEOUT)
+    for submit_id, submitted_at in expired:
+        age = max(0.0, now - submitted_at)
+        logg("[?] Share response unknown: id=%s after %.1fs" % (submit_id, age))
+        structured_logger.event(
+            "share_response_unknown", submit_id=submit_id,
+            age_seconds=round(age, 6),
+            reason="response_timeout" if not force else "connection_closed_before_response",
+        )
+        debug_log(
+            "Share response unknown", submit_id=submit_id,
+            age_seconds=round(age, 6), forced=force,
+        )
 
 
 def _validate_hex(value, length, field):
