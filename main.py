@@ -758,6 +758,11 @@ def upstream_listener(sock):
                                 submit_id=msg_id, latency_seconds=round(elapsed, 6),
                                 error=msg.get("error"), result=msg.get("result")
                             )
+                            if accepted:
+                                print(
+                                    Fore.YELLOW,
+                                    "[*] Pool accepted the candidate submission; payout still requires the block to be accepted by the Bitcoin network."
+                                )
                             logg(
                                 "[*] Share %s: id=%s latency=%.3fs error=%s"
                                 % (
@@ -1136,8 +1141,12 @@ def miner_loop():
                     except Exception as exc:
                         print(Fore.RED, "[!] Share submit failed:", exc)
 
+                    # A pool may not issue another notify after a submitted candidate.
+                    # Rotate extranonce2 and continue hashing the current job instead
+                    # of idling forever; a real new job will still replace this snapshot.
                     native_engine_stop_job(engine)
-                    waiting_for_new_job = True
+                    current_generation = None
+                    waiting_for_new_job = False
                     continue
 
                 if new_job["generation"] != current_generation:
@@ -1347,6 +1356,7 @@ def run():
         ")~~--------------",
     )
     print(Fore.WHITE, "[*] BTC address:", ADDRESS)
+    print(Fore.WHITE, "[*] Wallet source:", CONFIG.address_source)
     print(Fore.WHITE, "[*] Upstream:",
           "%s:%s" % (UPSTREAM_HOST, UPSTREAM_PORT))
     print(Fore.WHITE, "[*] CPU threads:", CPU_THREADS)
