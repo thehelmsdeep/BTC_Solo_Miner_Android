@@ -1251,6 +1251,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
                     (hits & 16U) ? (uint32_t)(n + 4) :
                     (hits & 32U) ? (uint32_t)(n + 5) :
                     (hits & 64U) ? (uint32_t)(n + 6) : (uint32_t)(n + 7);
+                if (!verify_nonce_reference(prefix, target, found_nonce)) continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
@@ -1313,6 +1314,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             local += 2;
             if (hits) {
                 uint32_t found_nonce = (hits & 1U) ? (uint32_t)n : (uint32_t)(n + 1);
+                if (!verify_nonce_reference(prefix, target, found_nonce)) continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
@@ -1336,7 +1338,8 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #endif
         for (; n < end; ++n) {
-            if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n)) {
+            if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n) &&
+                verify_nonce_reference(prefix, target, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
@@ -1351,7 +1354,8 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #else
         for (; n < end; ++n) {
-            if (hash_nonce(prefix, &base, target, (uint32_t)n)) {
+            if (hash_nonce(prefix, &base, target, (uint32_t)n) &&
+                verify_nonce_reference(prefix, target, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
