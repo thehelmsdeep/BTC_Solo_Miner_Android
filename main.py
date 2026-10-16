@@ -53,8 +53,12 @@ def timer():
 
 def logg(msg):
     """Compatibility logging API backed by human + JSONL event logs."""
-    structured_logger.log(msg)
-    structured_logger.event("log", message=str(msg))
+    text = str(msg)
+    if text.startswith("[!]") or " error:" in text.lower() or " failed" in text.lower():
+        structured_logger.record_error(text)
+    else:
+        structured_logger.log(text)
+        structured_logger.event("log", message=text)
 
 
 def debug_log(message, **fields):
@@ -80,6 +84,13 @@ def render_dashboard(rate, interval_hashes=None):
     print("Last Job     : %s" % (ctx.job_id or "none"))
     print("Debug Log    : miner-debug.log")
     print("Event Log    : %s" % structured_logger.event_path)
+    structured_logger.log_mining_status(
+        total_hashes=ctx.total_hashes,
+        shares_submitted=ctx.shares_submitted,
+        shares_accepted=ctx.shares_accepted,
+        shares_rejected=ctx.shares_rejected,
+        upstream_alive=ctx.upstream_alive,
+    )
     print("================================================")
 
 
