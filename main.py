@@ -1056,6 +1056,33 @@ def connect_upstream():
                 if params:
                     ctx.upstream_difficulty = params[0]
 
+            elif msg.get("method") == "mining.set_extranonce":
+                params = msg.get("params", [])
+                if len(params) < 2:
+                    raise RuntimeError("Invalid mining.set_extranonce during handshake")
+                _validate_hex_blob(params[0], "handshake extranonce1")
+                if isinstance(params[1], bool):
+                    raise RuntimeError("Invalid handshake extranonce2_size")
+                try:
+                    size = int(params[1])
+                except (TypeError, ValueError) as exc:
+                    raise RuntimeError("Invalid handshake extranonce2_size") from exc
+                if not 1 <= size <= 32:
+                    raise RuntimeError("Invalid handshake extranonce2_size")
+                with ctx.job_lock:
+                    ctx.job_id = None
+                    ctx.prevhash = None
+                    ctx.coinb1 = None
+                    ctx.coinb2 = None
+                    ctx.merkle_branch = None
+                    ctx.version = None
+                    ctx.nbits = None
+                    ctx.ntime = None
+                    ctx.clean_jobs = False
+                    ctx.upstream_extranonce1 = params[0]
+                    ctx.upstream_extranonce2_size = size
+                    ctx.job_generation += 1
+
     if not subscribed:
         raise TimeoutError("Upstream subscribe timed out")
     if not authorized:
