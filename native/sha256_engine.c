@@ -911,7 +911,8 @@ typedef struct {
  uint64_t local_hashes;
 } BM_PARALLEL_ARG;
 
-#define BM_CHUNK 262144ULL
+/* Larger reservations reduce shared atomic-counter traffic for persistent workers. */
+#define BM_CHUNK 1048576ULL
 
 static void bm_parallel_run(BM_PARALLEL_ARG *a) {
  /*
