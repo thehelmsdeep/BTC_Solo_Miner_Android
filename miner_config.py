@@ -18,7 +18,9 @@ def _positive_float(name, default, minimum=0.0):
     return max(minimum, value)
 
 
-DEFAULT_BTC_ADDRESS = "bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4"
+# No wallet address is embedded in the repository: ownership cannot be inferred
+# from a syntactically valid address, so require the operator to configure one.
+DEFAULT_BTC_ADDRESS = ""
 
 
 def _bech32_polymod(values):
@@ -106,11 +108,16 @@ def validate_btc_address(address):
 
 class MinerConfig:
     def __init__(self):
-        # An unset OR blank BTC_ADDRESS must never become the Stratum username.
-        # Keep the repository's built-in mainnet wallet as the reliable default.
+        # Never mine to an unverified hard-coded wallet. A valid address format
+        # does not prove ownership; require the operator's explicit BTC_ADDRESS.
         configured_address = os.getenv("BTC_ADDRESS", "").strip()
-        self.address = validate_btc_address(configured_address or DEFAULT_BTC_ADDRESS)
-        self.address_source = "BTC_ADDRESS environment variable" if configured_address else "built-in default"
+        if not configured_address:
+            raise ValueError(
+                "BTC_ADDRESS is required. Set it to a Bitcoin mainnet address "
+                "you control; no unverified built-in wallet is used."
+            )
+        self.address = validate_btc_address(configured_address)
+        self.address_source = "BTC_ADDRESS environment variable"
         self.upstream_host = os.getenv("STRATUM_HOST", "stratum.ckpool.org")
         self.upstream_port = _positive_int("STRATUM_PORT", 3333)
         self.worker_password = os.getenv("WORKER_PASSWORD", "x")
