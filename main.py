@@ -187,10 +187,9 @@ def ensure_native():
 
     machine = platform.machine().lower()
     asm_file = NATIVE_DIR / "sha256_arm64.S"
-    # Keep the verified C/ARM SHA2-intrinsics implementation as the default.
-    # Enable the hand-written assembly only for explicit experiments:
-    # BTC_MINER_ARM64_ASM=1
-    asm_setting = os.getenv("BTC_MINER_ARM64_ASM", "0").strip().lower()
+    # Use the hand-scheduled ARMv8 SHA2 compressor on ARM64 by default.
+    # Set BTC_MINER_ARM64_ASM=0 to fall back to compiler-generated intrinsics.
+    asm_setting = os.getenv("BTC_MINER_ARM64_ASM", "1").strip().lower()
     use_arm_asm = (
         os.name != "nt"
         and machine in ("aarch64", "arm64")
@@ -202,16 +201,14 @@ def ensure_native():
         source_files.append(asm_file)
         flags = [*flags, "-DBTC_MINER_ARM64_ASM"]
 
-    # Prefer the eight-nonce staged ARMv8 SHA2 pipeline on ARM64 by default.
-    # Explicit environment settings can still select OCTO, QUAD, or scalar-pair mode.
+    # Pair the staged eight-nonce pipeline with the selected ARM SHA2 compressor.
     # CPU thread count remains controlled independently by CPU_THREADS.
-    # The native correctness self-tests run before the engine is used.
+    # The existing native correctness self-tests run before the engine is used.
     octo_setting = os.getenv("BTC_MINER_ARM64_OCTO", "1").strip().lower()
     quad_setting = os.getenv("BTC_MINER_ARM64_QUAD", "0").strip().lower()
     arm64_crypto_build = (
         os.name != "nt"
         and machine in ("aarch64", "arm64")
-        and not use_arm_asm
     )
     if arm64_crypto_build and octo_setting in ("1", "true", "yes", "on"):
         flags = [*flags, "-DBTC_MINER_ARM64_OCTO"]
