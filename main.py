@@ -476,7 +476,7 @@ def build_header_prefix(job, extranonce2):
 
     header = (
         bytes.fromhex(job["version"])[::-1]
-        + bytes.fromhex(job["prevhash"])[::-1]
+        + bytes.fromhex(job["prevhash"])
         + merkle_root
         + bytes.fromhex(job["ntime"])[::-1]
         + bytes.fromhex(job["nbits"])[::-1]
