@@ -653,16 +653,44 @@ def submit_share(job_id, extranonce2, ntime, nonce, expected_generation=None):
     # write. Otherwise mining.notify/set_extranonce can race between the check
     # and send, causing a valid candidate to be submitted against stale metadata.
     with ctx.job_lock:
-        if expected_generation is not None and ctx.job_generation != expected_generation:
+        if expected_generation is None or ctx.job_generation != expected_generation:
             debug_log(
-                "Candidate not submitted because job changed",
+                "Candidate not submitted because job changed or generation is missing",
                 job_id=job_id, expected_generation=expected_generation,
                 current_generation=ctx.job_generation, nonce="%08x" % nonce,
             )
-            logg("[!] Candidate not submitted: job changed before mining.submit")
+            logg("[!] Candidate not submitted: job changed or generation missing")
             return None
         if not ctx.upstream_alive or ctx.upstream_sock is None:
             raise ConnectionError("Cannot submit candidate: Stratum connection is not active")
+
+        # Final end-to-end gate: reconstruct the current job's exact header
+        # and independently verify proof of work immediately before socket send.
+        if ctx.job_id != job_id or ctx.ntime != ntime:
+            raise ValueError("Candidate job/time does not match the active Stratum job")
+        verification_job = {
+            "job_id": ctx.job_id,
+            "prevhash": ctx.prevhash,
+            "coinb1": ctx.coinb1,
+            "coinb2": ctx.coinb2,
+            "merkle_branch": list(ctx.merkle_branch or []),
+            "version": ctx.version,
+            "nbits": ctx.nbits,
+            "ntime": ctx.ntime,
+            "clean_jobs": ctx.clean_jobs,
+            "extranonce1": ctx.upstream_extranonce1,
+            "extranonce2_size": ctx.upstream_extranonce2_size,
+            "generation": ctx.job_generation,
+        }
+        verification_prefix = build_header_prefix(verification_job, extranonce2)
+        verification_target = compact_to_target(verification_job["nbits"])
+        if not verify_header_pow(verification_prefix, nonce, verification_target):
+            structured_logger.event(
+                "pow_candidate_rejected_local_verification",
+                job_id=job_id, nonce="%08x" % nonce,
+                job_generation=ctx.job_generation,
+            )
+            raise ValueError("Candidate failed final independent SHA256d/target verification")
 
         with ctx.pending_submits_lock:
             submit_id = ctx.next_submit_id
@@ -1525,11 +1553,17 @@ def run():
             # response at disconnect is unknown, not a confirmed pool rejection.
             ctx.connected = False
             ctx.upstream_alive = False
+            # connect_upstream() may fail after creating a socket but before
+            # returning it, leaving local `sock` unset or pointing to an older
+            # session. Always close the socket owned by the current context.
+            active_sock = ctx.upstream_sock
             try:
-                sock.close()
+                if active_sock is not None:
+                    active_sock.close()
             except Exception:
                 pass
-            ctx.upstream_sock = None
+            if ctx.upstream_sock is active_sock:
+                ctx.upstream_sock = None
 
             with ctx.pending_submits_lock:
                 abandoned_submits = list(ctx.pending_submits.items())
