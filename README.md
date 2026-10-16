@@ -94,26 +94,46 @@ This is CPU solo mining. Finding a Bitcoin block is extremely unlikely at mobile
 
 ## Example Mining Dashboard
 
-The following is an example of the live dashboard shown while the miner is running:
+The following is the latest supplied runtime snapshot of the live dashboard:
 
 ```text
 ============== CPU Solo Miner ==============
 Wallet       : bc1qz9vpf26p0l43dyypcjnaws24hfyu2gz978kzh4
 Status       : Mining...
-Hashrate     : 47.533725 MH/s
-Interval Hash: 237764608
-Total Hashes : 1523466240
+Hashrate     : 49.206595 MH/s
+Interval Hash: 246,415,360
+Total Hashes : 54,830,956,544
 Submitted    : 0
 Accepted     : 0
 Rejected     : 0
+Pending      : 0
+Acceptance   : 0.00%
+Rejection    : 0.00%
+Shares/min   : 0.00 (session average)
+Last Submit  : never
+Last Result  : none
+Result Age   : never
+Share Latency: avg 0.000s | max 0.000s
 Pool Diff    : 10000
-Last Job     : 6ac58e0100001b0b
+Last Job     : 6ac5908f00007364
+PoW Candidates: 0
+PoW Verified  : 0
+PoW Verify Fail: 0
+Last PoW Hit  : never
+Last PoW State: none
+Bug Count    : 0
+Bugs (all recorded):
+  None
+Warning Count: 0
+Warnings (all recorded):
+  None
+Mining Time  : 00:16:57
 Debug Log    : miner-debug.log
 Event Log    : miner-events.jsonl
 ================================================
 ```
 
-> **Note:** These are example values copied from one runtime snapshot, not guaranteed or live values. `Submitted: 0`, `Accepted: 0`, and `Rejected: 0` mean no shares are shown as submitted or resolved in this snapshot; check the runtime logs to diagnose the reason.
+> **Note:** These values are a snapshot supplied from one mining session, not live values or a performance guarantee. In this snapshot no shares have been submitted or resolved, and no PoW candidates have been recorded. If that persists, inspect the runtime logs and share-generation/submission flow.
 
 ## Diagnostics
 
