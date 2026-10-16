@@ -636,7 +636,10 @@ static inline unsigned hash_nonce_arm_octo_words(const SHA256_CTX * restrict bas
         w[5] = 0; w[6] = 0; w[7] = 0; w[8] = 0; \
         w[9] = 0; w[10] = 0; w[11] = 0; w[12] = 0; \
         w[13] = 0; w[14] = 0; w[15] = 0x00000280U; \
-        memcpy(states[lane], base->h, sizeof(states[lane])); \
+        states[lane][0] = base->h[0]; states[lane][1] = base->h[1]; \ 
+        states[lane][2] = base->h[2]; states[lane][3] = base->h[3]; \ 
+        states[lane][4] = base->h[4]; states[lane][5] = base->h[5]; \ 
+        states[lane][6] = base->h[6]; states[lane][7] = base->h[7]; \
     } while (0)
     OCTO_INIT_LANE(0, nonce0);
     OCTO_INIT_LANE(1, nonce1);
