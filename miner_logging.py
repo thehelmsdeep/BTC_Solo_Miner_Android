@@ -28,6 +28,8 @@ class StructuredLogger:
         self._mining_started_at = time.monotonic()
         self._last_error_text = "None"
         self._last_warning_text = "None"
+        self._errors = []
+        self._warnings = []
 
         self._human_logger = logging.getLogger("solo_miner.human")
         self._human_logger.setLevel(logging.INFO)
@@ -63,6 +65,7 @@ class StructuredLogger:
             self._error_count += 1
             count = self._error_count
             self._last_error_text = str(message)
+            self._errors.append(str(message))
         duration = max(0.0, time.monotonic() - self._mining_started_at)
         self._human_logger.error(
             "ERROR_COUNT=%d | ERROR_TEXT=%s | MINING_DURATION=%s",
@@ -79,6 +82,7 @@ class StructuredLogger:
             self._warning_count += 1
             count = self._warning_count
             self._last_warning_text = str(message)
+            self._warnings.append(str(message))
         duration = max(0.0, time.monotonic() - self._mining_started_at)
         self._human_logger.warning(
             "WARNING_COUNT=%d | WARNING_TEXT=%s | MINING_DURATION=%s",
@@ -134,12 +138,16 @@ class StructuredLogger:
             last_error = self._last_error_text
             warning_count = self._warning_count
             last_warning = self._last_warning_text
+            errors = list(self._errors)
+            warnings = list(self._warnings)
         duration = max(0.0, time.monotonic() - self._mining_started_at)
         return {
             "error_count": count,
             "last_error": last_error,
+            "errors": errors,
             "warning_count": warning_count,
             "last_warning": last_warning,
+            "warnings": warnings,
             "mining_duration": self._format_duration(duration),
             "mining_duration_seconds": round(duration, 3),
         }
