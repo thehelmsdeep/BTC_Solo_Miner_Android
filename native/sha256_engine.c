@@ -520,7 +520,7 @@ static inline int hash_nonce_arm_words(const SHA256_CTX *base,
      * per-nonce hot path while preserving Bitcoin's little-endian target rule. */
 #define ARM_TARGET_WORD_CHECK(i) do { \
         uint32_t hash_word = BSWAP32(state[i]); \
-        uint32_t target_word = BSWAP32(target_words[i]); \
+        uint32_t target_word = target_words[i]; \
         if (hash_word < target_word) return 1; \
         if (hash_word > target_word) return 0; \
     } while (0)
@@ -636,7 +636,7 @@ static inline int arm_state_meets_target_words(const uint32_t state[8],
                                                 const uint32_t target_words[8]) {
 #define ARM_STATE_TARGET_CHECK(i) do { \
     uint32_t hash_word = BSWAP32(state[i]); \
-    uint32_t target_word = BSWAP32(target_words[i]); \
+    uint32_t target_word = target_words[i]; \
     if (hash_word < target_word) return 1; \
     if (hash_word > target_word) return 0; \
 } while (0)
@@ -732,10 +732,10 @@ static inline int hash_nonce_arm(const SHA256_CTX *base,
                                  const uint8_t target[32], uint32_t nonce) {
     uint32_t target_words[8];
     for (int i = 0; i < 8; ++i) {
-        target_words[i] = BSWAP32((uint32_t)target[i * 4]
-                                  | ((uint32_t)target[i * 4 + 1] << 8)
-                                  | ((uint32_t)target[i * 4 + 2] << 16)
-                                  | ((uint32_t)target[i * 4 + 3] << 24));
+        target_words[i] = (uint32_t)target[i * 4]
+                        | ((uint32_t)target[i * 4 + 1] << 8)
+                        | ((uint32_t)target[i * 4 + 2] << 16)
+                        | ((uint32_t)target[i * 4 + 3] << 24);
     }
     return hash_nonce_arm_words(base, t0, t1, t2, target_words, nonce);
 }
@@ -1399,10 +1399,10 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
 
     uint32_t prepared_target_words[8];
     for (int i = 0; i < 8; ++i) {
-        prepared_target_words[i] = BSWAP32((uint32_t)target[i*4] |
-                                             ((uint32_t)target[i*4+1] << 8) |
-                                             ((uint32_t)target[i*4+2] << 16) |
-                                             ((uint32_t)target[i*4+3] << 24));
+        prepared_target_words[i] = (uint32_t)target[i*4] |
+                                   ((uint32_t)target[i*4+1] << 8) |
+                                   ((uint32_t)target[i*4+2] << 16) |
+                                   ((uint32_t)target[i*4+3] << 24);
     }
 
     engine_lock(e);
