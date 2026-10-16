@@ -28,7 +28,7 @@ class MinerConfig:
         configured_address = os.getenv("BTC_ADDRESS", "").strip()
         self.address = configured_address or DEFAULT_BTC_ADDRESS
         self.address_source = "BTC_ADDRESS environment variable" if configured_address else "built-in default"
-        self.upstream_host = os.getenv("STRATUM_HOST", "solo.ckpool.org")
+        self.upstream_host = os.getenv("STRATUM_HOST", "stratum.ckpool.org")
         self.upstream_port = _positive_int("STRATUM_PORT", 3333)
         self.worker_password = os.getenv("WORKER_PASSWORD", "x")
         self.cpu_threads = _positive_int(
