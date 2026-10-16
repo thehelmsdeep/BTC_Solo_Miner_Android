@@ -868,6 +868,15 @@ def update_job(params):
         version, nbits, ntime, clean_jobs
     ) = params
 
+    # Decode and validate consensus target before touching shared job state.
+    # Otherwise malformed nBits could partially replace a valid active job
+    # even though this notification is subsequently rejected.
+    try:
+        decoded_target = compact_to_target(nbits)
+    except (TypeError, ValueError) as exc:
+        debug_log("Target decode failed", job_id=job_id, nbits=nbits, error=repr(exc))
+        raise
+
     with ctx.job_lock:
         previous_job_id = ctx.job_id
         ctx.job_id = job_id
@@ -884,13 +893,8 @@ def update_job(params):
     debug_log("Job lifecycle update", previous_job_id=previous_job_id,
               job_id=job_id, generation=generation, nbits=nbits,
               ntime=ntime, clean_jobs=clean_jobs, merkle_branches=len(merkle_branch))
-    try:
-        decoded_target = compact_to_target(nbits)
-        debug_log("Target decoded", job_id=job_id, nbits=nbits,
-                  target_hex="%064x" % decoded_target, target_bits=decoded_target.bit_length())
-    except (TypeError, ValueError) as exc:
-        debug_log("Target decode failed", job_id=job_id, nbits=nbits, error=repr(exc))
-        raise
+    debug_log("Target decoded", job_id=job_id, nbits=nbits,
+              target_hex="%064x" % decoded_target, target_bits=decoded_target.bit_length())
 
 
 def current_job():
