@@ -228,10 +228,11 @@ static inline void sha256_compress4(__m128i h[8],const __m128i in[16]) {
 }
 
 static inline int le_target_lane(const uint32_t hv[8][4],int lane,const uint32_t target_words[8]){
-    /* Compare big-endian digest state words directly. Target words are
-     * byte-swapped once per job, keeping BSWAP out of the per-lane hot path. */
+    /* SHA-256 state words serialize big-endian, while Bitcoin compares the
+     * digest as a little-endian uint256. Reverse each state word before the
+     * most-significant-word-first comparison against little-endian target words. */
     for(int i=7;i>=0;i--){
-        uint32_t hvv=hv[i][lane];
+        uint32_t hvv=BSWAP32(hv[i][lane]);
         uint32_t tv=target_words[i];
         if(hvv!=tv) return hvv<tv;
     }
@@ -308,8 +309,10 @@ static inline void sha256_compress8(__m256i h[8],const __m256i in[16]){
 }
 
 static inline int le_target_lane8(const uint32_t hv[8][8],int lane,const uint32_t target_words[8]){
+    /* Match the scalar and ARM paths: SHA-256 state words are big-endian,
+     * but the PoW integer is interpreted little-endian. */
     for(int i=7;i>=0;i--){
-        uint32_t hvv=hv[i][lane],tv=target_words[i];
+        uint32_t hvv=BSWAP32(hv[i][lane]),tv=target_words[i];
         if(hvv!=tv) return hvv<tv;
     }
     return 1;
