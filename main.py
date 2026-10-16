@@ -460,6 +460,14 @@ def compact_to_target(nbits):
     return target
 
 
+def stratum_prevhash_to_header(prevhash):
+    """Convert Stratum V1's 8 little-endian uint32 words to header bytes."""
+    raw = bytes.fromhex(prevhash)
+    if len(raw) != 32:
+        raise ValueError("Invalid prevhash length")
+    return b"".join(raw[i:i + 4][::-1] for i in range(0, 32, 4))
+
+
 def build_header_prefix(job, extranonce2):
     coinbase = bytes.fromhex(
         job["coinb1"] + (job.get("extranonce1") or ctx.upstream_extranonce1) +
@@ -476,7 +484,7 @@ def build_header_prefix(job, extranonce2):
 
     header = (
         bytes.fromhex(job["version"])[::-1]
-        + bytes.fromhex(job["prevhash"])
+        + stratum_prevhash_to_header(job["prevhash"])
         + merkle_root
         + bytes.fromhex(job["ntime"])[::-1]
         + bytes.fromhex(job["nbits"])[::-1]
