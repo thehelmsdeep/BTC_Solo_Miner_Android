@@ -218,7 +218,9 @@ def render_dashboard(rate, interval_hashes=None):
         best_nonce = best_hash_stats["nonce"]
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
-        ratio = 100.0 * best_value / best_target
+        # A smaller digest is closer to satisfying Bitcoin proof-of-work.
+        # Express closeness as target / digest, capped at 100%; never hash / target.
+        ratio = 100.0 if best_value <= best_target else (100.0 * best_target / best_value if best_value else 0.0)
         print("Hash/Target: %.6f%%" % ratio)
     else:
         print("Hash/Target: waiting")
