@@ -87,7 +87,7 @@ best_hash_stats = {
 }
 
 def record_best_hash(digest, target, job_id, nonce, engine):
-    """Keep the hash closest to its target, comparing hashes across job difficulties."""
+    """Keep the observed hash with the smallest relative distance to its job target."""
     value = int.from_bytes(digest, "little")
     target = int(target)
     if value <= 0 or target <= 0:
@@ -95,10 +95,15 @@ def record_best_hash(digest, target, job_id, nonce, engine):
     with best_hash_lock:
         previous_value = best_hash_stats["value"]
         previous_target = best_hash_stats["target"]
-        # Lower hash/target is better. Normalize because the target can change
-        # when the pool changes difficulty or sends a new job.
-        if (previous_value is None or previous_target is None or
-                value * previous_target < previous_value * target):
+        # Compare relative absolute distance so changing job targets remain comparable.
+        # This is a closeness metric, not the rule used to determine a winning hash.
+        distance = abs(value - target)
+        previous_distance = (
+            abs(previous_value - previous_target)
+            if previous_value is not None and previous_target is not None else None
+        )
+        if (previous_distance is None or
+                distance * previous_target < previous_distance * target):
             best_hash_stats.update(
                 value=value, target=target, job_id=str(job_id),
                 nonce="%08x" % int(nonce), engine=engine
