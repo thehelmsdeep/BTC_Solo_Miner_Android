@@ -25,7 +25,7 @@ The native C engine is required. Python mining fallback is disabled; if C cannot
 
 ## Mining
 
-The C engine hashes Bitcoin block headers with double SHA-256. Its nonce scan uses a rotated starting offset and allocates non-overlapping chunks to native threads. When the nonce space is exhausted, the miner rolls Stratum-authorized header fields such as `extranonce2` and `ntime`.
+The C engine hashes Bitcoin block headers with double SHA-256. It scans several independent, Stratum-valid header universes in parallel while retaining the rotated nonce scan. Each universe has its own `extranonce2`/`ntime` header and nonce space. Set `BTC_HEADER_UNIVERSES` to control the universe count (default 4; bounded by `CPU_THREADS`, maximum 8).
 
 ## Configuration
 
