@@ -203,7 +203,7 @@ def render_dashboard(rate, interval_hashes=None):
     with best_hash_lock:
         best_value = best_hash_stats["value"]
         best_target = best_hash_stats["target"]
-    print("Best Found % Toward Winning : %s" % ("%.12g%%" % min(100.0, (best_target / best_value) * 100.0) if best_value is not None and best_target else "waiting for hash"))
+    print("Best Hash / Target : %s" % ("%.12g%%" % ((best_target / best_value) * 100.0) if best_value is not None and best_target and best_value > 0 else "waiting for hash"))
     print("Target Status     : %s" % (("VALID (hash <= target)" if best_value <= best_target else "above target") if best_value is not None and best_target else "waiting for hash"))
     print("")
     print(Fore.CYAN + "=== 2. POOL CONNECTION / JOB ===" + Style.RESET_ALL)
