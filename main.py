@@ -34,6 +34,7 @@ WORKER_PASSWORD = CONFIG.worker_password
 CPU_THREADS = CONFIG.cpu_threads
 NONCE_BATCH = CONFIG.nonce_batch
 REPORT_INTERVAL = CONFIG.report_interval
+HEADER_ROTATE_INTERVAL = max(1.0, float(os.getenv("BTC_MINER_HEADER_ROTATE_SECONDS", "5")))
 RECONNECT_DELAY = CONFIG.reconnect_delay
 SUBMIT_TIMEOUT = CONFIG.submit_timeout
 NATIVE_DIR = pathlib.Path(__file__).resolve().parent / "native"
@@ -183,7 +184,7 @@ def render_dashboard(rate, interval_hashes=None):
     header_status = mining_header_status
     print("Header Source: %s" % header_status["mode"])
     print("Variable Now : Nonce (changes on every hash)")
-    print("Header Rotate: extranonce2 + ntime (periodic)")
+    print("Header Rotate: every %.0fs (extranonce2 + ntime)" % HEADER_ROTATE_INTERVAL if header_status["mode"] != "waiting for job" else "Header Rotate: waiting for job")
     print("Header Job   : %s" % (header_status["job_id"] or "waiting"))
     print("Header Fields: Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
     print("Active Extra2: %s" % (header_status["extranonce2"] or "waiting"))
@@ -1322,9 +1323,7 @@ def miner_loop():
             # Refresh mutable header fields periodically, without waiting for the
             # 32-bit nonce range to be exhausted. Keep the interval long enough
             # to avoid repeatedly rebuilding the coinbase/Merkle root.
-            header_rotate_interval = max(
-                1.0, float(os.getenv("BTC_MINER_HEADER_ROTATE_SECONDS", "5"))
-            )
+            header_rotate_interval = HEADER_ROTATE_INTERVAL
             last_header_rotation = time.monotonic()
 
             while not ctx.fShutdown and ctx.upstream_alive:
@@ -1413,9 +1412,11 @@ def miner_loop():
                     # the usual two-hour future allowance.
                     base_ntime = current_job.get("base_ntime", current_job["ntime"])
                     base_time = int(base_ntime, 16)
-                    now_limit = min(0xFFFFFFFF, int(time.time()) + 7200)
-                    lower_time = min(base_time, now_limit)
-                    ntime_value = secrets.randbelow(max(1, now_limit - lower_time + 1)) + lower_time
+                    now_limit = min(0xFFFFFFFF, int(time.time()))
+                    ntime_value = (
+                        secrets.randbelow(now_limit - base_time + 1) + base_time
+                        if now_limit >= base_time else base_time
+                    )
                     ntime = "%08x" % ntime_value
                     header_prefix = build_header_prefix(
                         current_job, extranonce2, ntime=ntime
@@ -1443,14 +1444,16 @@ def miner_loop():
                 # Randomly roll the Stratum-authorized fields on a timer, not just
                 # after nonce exhaustion. Prevhash and nBits belong to the pool job;
                 # version rolling is only safe when explicitly negotiated.
-                if time.monotonic() - last_header_rotation >= header_rotate_interval:
+                if not hit and time.monotonic() - last_header_rotation >= header_rotate_interval:
                     extranonce2_size = int(current_job["extranonce2_size"])
                     extranonce2 = secrets.token_bytes(extranonce2_size).hex()
                     base_ntime = current_job.get("base_ntime", current_job["ntime"])
                     base_time = int(base_ntime, 16)
-                    now_limit = min(0xFFFFFFFF, int(time.time()) + 7200)
-                    lower_time = min(base_time, now_limit)
-                    ntime_value = secrets.randbelow(max(1, now_limit - lower_time + 1)) + lower_time
+                    now_limit = min(0xFFFFFFFF, int(time.time()))
+                    ntime_value = (
+                        secrets.randbelow(now_limit - base_time + 1) + base_time
+                        if now_limit >= base_time else base_time
+                    )
                     ntime = "%08x" % ntime_value
                     header_prefix = build_header_prefix(
                         current_job, extranonce2, ntime=ntime
@@ -1584,6 +1587,7 @@ def miner_loop():
     stop_event = None
     last_report = time.monotonic()
     hashes_since_report = 0
+    last_header_rotation = time.monotonic()
 
     while not ctx.fShutdown and ctx.upstream_alive:
         job = globals()["current_job"]()
@@ -1594,6 +1598,11 @@ def miner_loop():
 
         stop_workers(workers, stop_event) if workers else None
         workers, stop_event, result_queue, extranonce2 = start_workers(job)
+        last_header_rotation = time.monotonic()
+        mining_header_status.update(
+            job_id=job["job_id"], extranonce2=extranonce2,
+            ntime=job["ntime"], mode="randomized extranonce2 + ntime",
+        )
         debug_log("Python job mining started", job_id=job["job_id"],
                   target_hex="%064x" % compact_to_target(job["nbits"]),
                   target_bits=compact_to_target(job["nbits"]).bit_length(),
@@ -1728,6 +1737,33 @@ def miner_loop():
                 break
 
             now = time.monotonic()
+            if now - last_header_rotation >= HEADER_ROTATE_INTERVAL:
+                # Replace Python workers with a new exact header snapshot.
+                # Keep ntime at/after the pool base and never roll into the future.
+                base_time = int(job.get("base_ntime", job["ntime"]), 16)
+                now_time = min(0xFFFFFFFF, int(time.time()))
+                ntime_value = (
+                    secrets.randbelow(now_time - base_time + 1) + base_time
+                    if now_time >= base_time else base_time
+                )
+                rotated_job = dict(job)
+                rotated_job["base_ntime"] = job.get("base_ntime", job["ntime"])
+                rotated_job["ntime"] = "%08x" % ntime_value
+                stop_workers(workers, stop_event)
+                workers, stop_event, result_queue, extranonce2 = start_workers(rotated_job)
+                job = rotated_job
+                last_header_rotation = time.monotonic()
+                mining_header_status.update(
+                    job_id=job["job_id"], extranonce2=extranonce2,
+                    ntime=job["ntime"], mode="randomized extranonce2 + ntime",
+                )
+                debug_log(
+                    "Randomized mutable header fields", engine="python",
+                    job_id=job["job_id"], extranonce2=extranonce2,
+                    ntime=job["ntime"], interval_seconds=HEADER_ROTATE_INTERVAL,
+                )
+                continue
+
             if now - last_report >= REPORT_INTERVAL:
                 elapsed = max(now - last_report, 0.001)
                 rate = hashes_since_report / elapsed
