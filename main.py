@@ -170,7 +170,7 @@ def render_dashboard(rate, interval_hashes=None):
     print("Share Latency: avg %.3fs | max %.3fs" % (average_latency, latency_max))
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
-    print("Mining Block Data : Previous Block Hash = %s" % (ctx.prevhash or "waiting for job"))
+    print("Hashing Data : New Block Header (Prev Hash + Merkle Root + Time + nBits + Nonce)")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
