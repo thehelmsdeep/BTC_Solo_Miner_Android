@@ -170,8 +170,6 @@ def render_dashboard(rate, interval_hashes=None):
     print("Wallet       : " + ADDRESS)
     print("Status       : " + ("Mining..." if ctx.upstream_alive else "Connecting..."))
     print("Hashrate     : %s MH/s" % format(rate / 1_000_000, ",.6f"))
-    if interval_hashes is not None:
-        print("Interval Hash: %s" % format(interval_hashes, ","))
     print("Total Hashes : %s" % format(ctx.total_hashes, ","))
     now_mono = time.monotonic()
     with share_stats_lock:
@@ -202,11 +200,9 @@ def render_dashboard(rate, interval_hashes=None):
     print("Pending      : %s" % format(pending_count, ","))
     print("Acceptance   : %.2f%%" % acceptance_rate)
     print("Rejection    : %.2f%%" % rejection_rate)
-    print("Shares/min   : %.2f (session average)" % submit_per_min)
     print("Last Submit  : %s" % ("never" if submit_age is None else "%.1fs ago" % submit_age))
     print("Last Result  : %s%s" % (last_result, (" | " + last_error) if last_error else ""))
     print("Result Age   : %s" % ("never" if result_age is None else "%.1fs ago" % result_age))
-    print("Share Latency: avg %.3fs | max %.3fs" % (average_latency, latency_max))
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
     print("Hashing Data : New Block Header (Prev Hash + Merkle Root + Time + nBits + Nonce)")
@@ -251,14 +247,12 @@ def render_dashboard(rate, interval_hashes=None):
     if pow_last_job:
         print("PoW Job/Nonce : %s / %s (%s)" % (pow_last_job, pow_last_nonce, pow_last_engine))
     snapshot = structured_logger.dashboard_snapshot()
-    print("Bug Count    : %d" % snapshot["error_count"])
     print("Bugs (all recorded):")
     if snapshot["errors"]:
         for index, message in enumerate(snapshot["errors"], 1):
             print("  %d. %s" % (index, message))
     else:
         print("  None")
-    print("Warning Count: %d" % snapshot["warning_count"])
     print("Warnings (all recorded):")
     if snapshot["warnings"]:
         for index, message in enumerate(snapshot["warnings"], 1):
