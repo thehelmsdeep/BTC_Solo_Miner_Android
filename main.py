@@ -333,8 +333,13 @@ def parse_messages(buffer):
             if not isinstance(message, dict):
                 raise ValueError("Stratum message must be a JSON object")
             messages.append(message)
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
-            logg("[!] Invalid Stratum JSON/object: %r" % line)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            # A malformed upstream line must not be counted as an internal miner bug.
+            # Keep the raw line in diagnostics and continue processing subsequent frames.
+            preview = repr(line[:240])
+            warning = "Malformed Stratum line ignored (%s): %s" % (type(exc).__name__, preview)
+            structured_logger.record_warning(warning, source="stratum_parser")
+            structured_logger.debug(warning)
     return messages, buffer
 
 
