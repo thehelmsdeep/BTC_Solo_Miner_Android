@@ -1623,7 +1623,7 @@ def miner_loop():
                         hashrate_hs=round(rate, 3),
                         hashrate_mhs=round(rate / 1_000_000, 6),
                         pool_difficulty=ctx.upstream_difficulty,
-                        nonce_allocated_until="%08x" % min(allocated, 0xFFFFFFFF),
+                        nonce_cursor="%08x" % allocated,
                         nonce_space=2**32,
                         universes=universe_count,
                         memory=memory_snapshot(),
@@ -1636,7 +1636,7 @@ def miner_loop():
                             "job_id": item["snapshot"]["job_id"] if item["snapshot"] else "waiting",
                             "extranonce2": item["snapshot"]["extranonce2"] if item["snapshot"] else "waiting",
                             "ntime": item["snapshot"]["ntime"] if item["snapshot"] else "waiting",
-                            "nonce_cursor": "%08x" % min(native_engine_next_nonce(item["engine"]), 0xFFFFFFFF),
+                            "nonce_cursor": "%08x" % native_engine_next_nonce(item["engine"]),
                             "last_rotation_at": item["last_rotation"],
                         }
                         for index, item in enumerate(universes, 1)
