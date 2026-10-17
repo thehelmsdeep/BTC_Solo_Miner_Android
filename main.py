@@ -721,7 +721,7 @@ def build_header_prefix(job, extranonce2, ntime=None, version=None):
     return header
 
 
-def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
+def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue, nonce_offset=0):
     try:
         header_prefix = build_header_prefix(job, extranonce2)
         target = compact_to_target(job["nbits"])
@@ -733,28 +733,34 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
         sha256 = hashlib.sha256
         base = sha256(header_prefix[:64])
         tail = header_prefix[64:]
+        # Walk a rotated logical nonce space. Worker i owns logical counters
+        # i, i + worker_count, ...; adding one shared random offset rotates the
+        # full 32-bit space without overlap, including across the uint32 wrap.
         nonce = worker_id
         hashes = 0
+        worker_count = max(1, CPU_THREADS)
+        nonce_limit = 0x100000000
 
-        while not stop_event.is_set() and nonce <= 0xFFFFFFFF:
+        while not stop_event.is_set() and nonce < nonce_limit:
             end_nonce = min(
-                nonce + NONCE_BATCH * CPU_THREADS,
-                0x100000000
+                nonce + NONCE_BATCH * worker_count,
+                nonce_limit
             )
             while nonce < end_nonce and not stop_event.is_set():
+                actual_nonce = (nonce_offset + nonce) & 0xFFFFFFFF
                 first = base.copy()
                 first.update(tail)
-                first.update(nonce.to_bytes(4, "little"))
+                first.update(actual_nonce.to_bytes(4, "little"))
                 digest = sha256(first.digest()).digest()
                 hashes += 1
                 # Keep the dashboard aligned with the latest generated hash.
                 # Do not write per-hash log entries; only update in-memory state.
-                record_best_hash(digest, target, job["job_id"], nonce, "python")
+                record_best_hash(digest, target, job["job_id"], actual_nonce, "python")
 
                 if int.from_bytes(digest, "little") <= target:
                     record_best_hash(digest, target, job["job_id"], nonce, "python")
                     result_queue.put((
-                        "found", nonce, job["job_id"], job["ntime"], hashes - reported_hashes
+                        "found", actual_nonce, job["job_id"], job["ntime"], hashes - reported_hashes
                     ))
                     stop_event.set()
                     return
@@ -763,7 +769,7 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
                 if now - last_report >= REPORT_INTERVAL:
                     delta = hashes - reported_hashes
                     if delta:
-                        result_queue.put(("worker_progress", worker_id, nonce, delta, round(now - last_report, 3)))
+                        result_queue.put(("worker_progress", worker_id, (nonce_offset + nonce) & 0xFFFFFFFF, delta, round(now - last_report, 3)))
                         reported_hashes = hashes
                     last_report = now
 
@@ -801,11 +807,14 @@ def start_workers(job):
     ).hex()
 
     worker_count = 1 if ensure_native() is not None else CPU_THREADS
+    # One rotation per worker set. Combined with disjoint logical strides,
+    # this changes the starting point without losing or duplicating any nonce.
+    nonce_offset = secrets.randbits(32)
 
     for worker_id in range(worker_count):
         process = mp.Process(
             target=cpu_worker,
-            args=(worker_id, job, extranonce2, stop_event, result_queue),
+            args=(worker_id, job, extranonce2, stop_event, result_queue, nonce_offset),
             daemon=True,
         )
         process.start()
@@ -1702,7 +1711,7 @@ def miner_loop():
                         _, worker_id, worker_job, target, prefix_len = event
                         debug_log("Worker started", worker_id=worker_id, job_id=worker_job,
                                   target_hex="%064x" % target, header_prefix_bytes=prefix_len,
-                                  nonce_start=worker_id, nonce_stride=CPU_THREADS)
+                                  nonce_start=(nonce_offset + worker_id) & 0xFFFFFFFF, nonce_stride=CPU_THREADS)
 
                     elif event[0] == "worker_progress":
                         _, worker_id, next_nonce, delta_hashes, elapsed = event
