@@ -219,10 +219,10 @@ def render_dashboard(rate, interval_hashes=None):
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
         ratio = 100.0 * best_value / best_target
-        print("Best Hash/Target: %.6f%% (%s)" % (ratio, "VALID" if best_value <= best_target else "above target"))
-        print("Best Hash Nonce : %s | Job: %s | Engine: %s" % (best_nonce, best_job, best_engine))
+        print("Observed Hash/Target: %.6f%% (%s)" % (ratio, "VALID" if best_value <= best_target else "above target"))
+        print("Observed Hash   : %s | Job: %s | Engine: %s" % (best_nonce, best_job, best_engine))
     else:
-        print("Best Hash/Target: waiting for real digest telemetry")
+        print("Observed Hash/Target: waiting for completed native nonce chunk")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
@@ -455,6 +455,8 @@ def ensure_native():
 
         lib.b_m_engine_exhausted.argtypes = [ctypes.c_void_p]
         lib.b_m_engine_exhausted.restype = ctypes.c_int
+        lib.b_m_engine_sample_nonce.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        lib.b_m_engine_sample_nonce.restype = ctypes.c_int
         lib.b_m_engine_next_nonce.argtypes = [ctypes.c_void_p]
         lib.b_m_engine_next_nonce.restype = ctypes.c_uint64
 
@@ -545,6 +547,16 @@ def native_engine_poll(engine):
         engine, ctypes.byref(found), ctypes.byref(hashes)
     )
     return bool(hit), found.value, hashes.value
+
+
+def native_engine_sample_nonce(engine):
+    lib = ensure_native()
+    if lib is None or not engine:
+        return None
+    nonce = ctypes.c_uint32(0)
+    if not lib.b_m_engine_sample_nonce(engine, ctypes.byref(nonce)):
+        return None
+    return nonce.value
 
 
 def native_engine_exhausted(engine):
@@ -1431,6 +1443,13 @@ def miner_loop():
                     continue
 
                 hit, found, hashes = native_engine_poll(engine)
+                # The native engine publishes only a nonce from a fully scanned
+                # chunk. Recompute its real SHA256d digest for dashboard telemetry.
+                sampled_nonce = native_engine_sample_nonce(engine)
+                if sampled_nonce is not None:
+                    sampled_header = header_prefix + int(sampled_nonce).to_bytes(4, "little")
+                    sampled_digest = hashlib.sha256(hashlib.sha256(sampled_header).digest()).digest()
+                    record_best_hash(sampled_digest, target, job["job_id"], sampled_nonce, "native-sampled")
                 # Account for the final completed nonce chunk even when the engine
                 # reports exhaustion in the same polling interval.
                 if hashes:
