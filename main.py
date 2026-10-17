@@ -75,7 +75,7 @@ pow_stats = {
     "last_engine": "",
 }
 
-# Most recently observed real proof-of-work digest for the dashboard.
+# Best observed real proof-of-work digest, normalized against its job target.
 # Native mode reports a nonce from a completed scan chunk; Python mode records
 # each digest without logging every hash to disk.
 best_hash_lock = threading.Lock()
@@ -88,13 +88,22 @@ best_hash_stats = {
 }
 
 def record_best_hash(digest, target, job_id, nonce, engine):
-    """Record the latest real SHA256d digest and its matching job target."""
+    """Keep the hash closest to its target, comparing hashes across job difficulties."""
     value = int.from_bytes(digest, "little")
+    target = int(target)
+    if value <= 0 or target <= 0:
+        return
     with best_hash_lock:
-        best_hash_stats.update(
-            value=value, target=int(target), job_id=str(job_id),
-            nonce="%08x" % int(nonce), engine=engine
-        )
+        previous_value = best_hash_stats["value"]
+        previous_target = best_hash_stats["target"]
+        # Lower hash/target is better. Normalize because the target can change
+        # when the pool changes difficulty or sends a new job.
+        if (previous_value is None or previous_target is None or
+                value * previous_target < previous_value * target):
+            best_hash_stats.update(
+                value=value, target=target, job_id=str(job_id),
+                nonce="%08x" % int(nonce), engine=engine
+            )
 
 # Current header recipe shown in the live dashboard.
 mining_header_status = {
@@ -217,14 +226,12 @@ def render_dashboard(rate, interval_hashes=None):
         best_nonce = best_hash_stats["nonce"]
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
-        # Show the latest observed hash's distance to its matching job target.
-        # Scientific notation preserves tiny non-zero percentages instead of
-        # rounding ordinary proof-of-work candidates down to 0.000000%.
-        ratio = 100.0 * best_target / best_value if best_value else 100.0
-        ratio = min(100.0, ratio)
-        print("Latest Hash Closeness: %.6g%%" % ratio)
+        # Show the best observed hash's closeness to its own job target.
+        # Scientific notation preserves tiny non-zero percentages.
+        ratio = min(100.0, 100.0 * best_target / best_value) if best_value else 100.0
+        print("Best Hash Closeness: %.6g%%" % ratio)
     else:
-        print("Latest Hash Closeness: waiting for hash")
+        print("Best Hash Closeness: waiting for hash")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
