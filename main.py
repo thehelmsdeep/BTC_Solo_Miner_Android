@@ -515,7 +515,7 @@ def ensure_native():
         return None
 
 
-def native_engine_create(header_prefix, target):
+def native_engine_create(header_prefix, target, thread_count=None):
     global _native_engine
     lib = ensure_native()
     if lib is None:
@@ -525,7 +525,8 @@ def native_engine_create(header_prefix, target):
     target_bytes = (ctypes.c_uint8 * 32).from_buffer_copy(
         target.to_bytes(32, "little")
     )
-    engine = lib.b_m_engine_create(ctypes.c_uint32(CPU_THREADS))
+    engine_threads = CPU_THREADS if thread_count is None else max(1, int(thread_count))
+    engine = lib.b_m_engine_create(ctypes.c_uint32(engine_threads))
     if not engine:
         raise RuntimeError("Failed to create persistent native mining engine")
 
@@ -1318,18 +1319,57 @@ def miner_loop():
     if native_lib is not None:
         last_report = time.monotonic()
         hashes_since_report = 0
-        engine = native_engine_create(b"\x00" * 76, 0)
+
+        # Keep the total native thread count bounded by CPU_THREADS while
+        # scanning several independent, Stratum-valid header universes.
+        try:
+            requested_universes = int(os.getenv("BTC_HEADER_UNIVERSES", "4"))
+        except (TypeError, ValueError):
+            requested_universes = 4
+        universe_count = max(1, min(CPU_THREADS, requested_universes, 8))
+        base_threads, extra_threads = divmod(CPU_THREADS, universe_count)
+        universes = []
+        for index in range(universe_count):
+            assigned_threads = base_threads + (1 if index < extra_threads else 0)
+            universes.append({
+                "engine": native_engine_create(b"\x00" * 76, 0, assigned_threads),
+                "snapshot": None,
+                "last_rotation": time.monotonic(),
+            })
 
         try:
             current_generation = None
-            current_job = None
-            extranonce2 = None
             waiting_for_new_job = False
-            # Refresh mutable header fields periodically, without waiting for the
-            # 32-bit nonce range to be exhausted. Keep the interval long enough
-            # to avoid repeatedly rebuilding the coinbase/Merkle root.
             header_rotate_interval = HEADER_ROTATE_INTERVAL
-            last_header_rotation = time.monotonic()
+
+            def make_universe_snapshot(job_data, universe_index, used_extranonces):
+                size = int(job_data["extranonce2_size"])
+                while True:
+                    candidate_extranonce2 = secrets.token_bytes(size).hex()
+                    if candidate_extranonce2 not in used_extranonces:
+                        used_extranonces.add(candidate_extranonce2)
+                        break
+
+                base_ntime = job_data.get("base_ntime", job_data["ntime"])
+                base_time = int(base_ntime, 16)
+                now_limit = min(0xFFFFFFFF, int(time.time()))
+                if now_limit >= base_time:
+                    candidate_time = secrets.randbelow(now_limit - base_time + 1) + base_time
+                else:
+                    candidate_time = base_time
+                candidate_ntime = "%08x" % candidate_time
+                prefix = build_header_prefix(
+                    job_data, candidate_extranonce2, ntime=candidate_ntime
+                )
+                return {
+                    **dict(job_data),
+                    "base_ntime": base_ntime,
+                    "extranonce2": candidate_extranonce2,
+                    "ntime": candidate_ntime,
+                    "header_prefix": prefix,
+                    "target": compact_to_target(job_data["nbits"]),
+                    "universe_id": universe_index,
+                }
 
             while not ctx.fShutdown and ctx.upstream_alive:
                 job = globals()["current_job"]()
@@ -1338,51 +1378,42 @@ def miner_loop():
                     continue
 
                 if job["generation"] != current_generation and not waiting_for_new_job:
-                    extranonce2_size = int(job["extranonce2_size"])
-                    mask = (1 << (8 * extranonce2_size)) - 1
-                    extranonce2 = secrets.token_bytes(extranonce2_size).hex()
-                    ntime = job["ntime"]
+                    used_extranonces = set()
+                    for index, universe in enumerate(universes):
+                        snapshot = make_universe_snapshot(job, index, used_extranonces)
+                        if not native_engine_set_job(
+                            universe["engine"], snapshot["header_prefix"], snapshot["target"]
+                        ):
+                            raise RuntimeError(
+                                "Failed to set native job for header universe %d" % index
+                            )
+                        universe["snapshot"] = snapshot
+                        universe["last_rotation"] = time.monotonic()
 
-                    header_prefix = build_header_prefix(job, extranonce2, ntime=ntime)
-                    target = compact_to_target(job["nbits"])
-
-                    if not native_engine_set_job(engine, header_prefix, target):
-                        raise RuntimeError("Failed to update native mining job")
-
-                    # Freeze the exact job/extranonce/header used by native hashing.
-                    # A later mining.notify must never mix metadata into a found nonce.
-                    current_job = dict(job)
-                    current_job["base_ntime"] = job["ntime"]
-                    current_job["ntime"] = ntime
-                    current_job["extranonce2"] = extranonce2
-                    current_job["header_prefix"] = header_prefix
-                    last_header_rotation = time.monotonic()
-                    current_job["target"] = target
                     current_generation = job["generation"]
                     mining_header_status.update(
                         job_id=job["job_id"],
-                        extranonce2=extranonce2,
-                        ntime=ntime,
-                        mode="randomized extranonce2 + ntime",
+                        extranonce2=universes[0]["snapshot"]["extranonce2"],
+                        ntime=universes[0]["snapshot"]["ntime"],
+                        mode="multi-universe + rotational header",
                     )
-
                     print(
                         Fore.CYAN,
-                        "[*] CPU mining job=%s with %d persistent C threads"
-                        % (job["job_id"], CPU_THREADS),
-                    )
-                    print(
-                        Fore.WHITE,
-                        "[*] Job details: nbits=%s | target=%064x | ntime=%s | clean_jobs=%s"
-                        % (job["nbits"], target, job["ntime"], job["clean_jobs"]),
+                        "[*] CPU mining job=%s | %d header universes | %d total C threads"
+                        % (job["job_id"], universe_count, CPU_THREADS),
                     )
                     logg(
-                        "[*] New job: id=%s nbits=%s target=%064x ntime=%s clean_jobs=%s"
-                        % (job["job_id"], job["nbits"], target, job["ntime"], job["clean_jobs"])
+                        "[*] Multi-universe header engine active: job=%s universes=%d threads=%d"
+                        % (job["job_id"], universe_count, CPU_THREADS)
                     )
-                    debug_log("Target ready for native engine", job_id=job["job_id"],
-                              target_hex="%064x" % target, target_bits=target.bit_length(),
-                              header_prefix_bytes=len(header_prefix), nonce_space=2**32)
+                    debug_log(
+                        "Multi-universe headers ready",
+                        job_id=job["job_id"],
+                        universes=universe_count,
+                        threads=CPU_THREADS,
+                        nbits=job["nbits"],
+                        nonce_space=2**32,
+                    )
 
                 new_job = globals()["current_job"]()
                 if new_job is None:
@@ -1396,153 +1427,80 @@ def miner_loop():
                     time.sleep(0.05)
                     continue
 
-                hit, found, hashes = native_engine_poll(engine)
-                # The native engine publishes only a nonce from a fully scanned
-                # chunk. Recompute its real SHA256d digest for dashboard telemetry.
-                sampled_nonce = native_engine_sample_nonce(engine)
-                if sampled_nonce is not None:
-                    sampled_digest = native_sha256d(header_prefix, int(sampled_nonce))
-                    record_best_hash(sampled_digest, target, job["job_id"], sampled_nonce, "native-C")
-                # Account for the final completed nonce chunk even when the engine
-                # reports exhaustion in the same polling interval.
-                if hashes:
-                    hashes_since_report += hashes
-                    ctx.total_hashes += hashes
-                    metrics.add_hashes(hashes)
+                found_candidate = None
+                for universe in universes:
+                    snapshot = universe["snapshot"]
+                    hit, found, hashes = native_engine_poll(universe["engine"])
+                    sampled_nonce = native_engine_sample_nonce(universe["engine"])
+                    if sampled_nonce is not None and snapshot is not None:
+                        sampled_digest = native_sha256d(
+                            snapshot["header_prefix"], int(sampled_nonce)
+                        )
+                        record_best_hash(
+                            sampled_digest, snapshot["target"], snapshot["job_id"],
+                            sampled_nonce, "native-C-universe-%d" % snapshot["universe_id"],
+                        )
+                    if hashes:
+                        hashes_since_report += hashes
+                        ctx.total_hashes += hashes
+                        metrics.add_hashes(hashes)
+                    if hit and snapshot is not None and found_candidate is None:
+                        found_candidate = (snapshot, found)
 
-                # Preserve a hit even if its final nonce chunk also exhausts the nonce space.
-                if native_engine_exhausted(engine) and not hit:
-                    # Each complete 32-bit nonce range gets a fresh coinbase
-                    # extranonce, which changes the Merkle root and therefore
-                    # creates a new header search space without walking time
-                    # forward thousands of times on the same coinbase.
-                    extranonce2_size = int(current_job["extranonce2_size"])
-                    extranonce2 = secrets.token_bytes(extranonce2_size).hex()
-                    # Stratum permits rolling ntime only within a bounded range.
-                    # Never go earlier than the job's original ntime or later than
-                    # the usual two-hour future allowance.
-                    base_ntime = current_job.get("base_ntime", current_job["ntime"])
-                    base_time = int(base_ntime, 16)
-                    now_limit = min(0xFFFFFFFF, int(time.time()))
-                    # Roll ntime forward deterministically within the current-time
-                    # limit; avoid random backward jumps and repeated timestamps.
-                    previous_ntime = int(current_job.get("ntime", base_ntime), 16)
-                    ntime_value = min(now_limit, max(base_time, previous_ntime + 1))
-                    ntime = "%08x" % ntime_value
-                    header_prefix = build_header_prefix(
-                        current_job, extranonce2, ntime=ntime
-                    )
-                    target = compact_to_target(current_job["nbits"])
-                    if not native_engine_set_job(engine, header_prefix, target):
-                        raise RuntimeError("Failed to restart native engine after nonce exhaustion")
-
-                    current_job["extranonce2"] = extranonce2
-                    current_job["ntime"] = ntime
-                    current_job["header_prefix"] = header_prefix
-                    current_job["target"] = target
-                    last_header_rotation = time.monotonic()
-                    mining_header_status.update(
-                        job_id=current_job["job_id"],
-                        extranonce2=extranonce2,
-                        ntime=ntime,
-                        mode="randomized extranonce2 + ntime",
-                    )
-                    message = "[!] Nonce space exhausted; randomized extranonce2/ntime and resumed the same job"
-                    print(Fore.YELLOW, message)
-                    logg(message)
-                    continue
-
-                # Randomly roll the Stratum-authorized fields on a timer, not just
-                # after nonce exhaustion. Prevhash and nBits belong to the pool job;
-                # version rolling is only safe when explicitly negotiated.
-                if not hit and time.monotonic() - last_header_rotation >= header_rotate_interval:
-                    extranonce2_size = int(current_job["extranonce2_size"])
-                    extranonce2 = secrets.token_bytes(extranonce2_size).hex()
-                    base_ntime = current_job.get("base_ntime", current_job["ntime"])
-                    base_time = int(base_ntime, 16)
-                    now_limit = min(0xFFFFFFFF, int(time.time()))
-                    ntime_value = (
-                        secrets.randbelow(now_limit - base_time + 1) + base_time
-                        if now_limit >= base_time else base_time
-                    )
-                    ntime = "%08x" % ntime_value
-                    header_prefix = build_header_prefix(
-                        current_job, extranonce2, ntime=ntime
-                    )
-                    target = compact_to_target(current_job["nbits"])
-                    if not native_engine_set_job(engine, header_prefix, target):
-                        raise RuntimeError("Failed to rotate randomized native header")
-                    current_job["extranonce2"] = extranonce2
-                    current_job["ntime"] = ntime
-                    current_job["header_prefix"] = header_prefix
-                    current_job["target"] = target
-                    last_header_rotation = time.monotonic()
-                    mining_header_status.update(
-                        job_id=current_job["job_id"],
-                        extranonce2=extranonce2,
-                        ntime=ntime,
-                        mode="randomized extranonce2 + ntime",
-                    )
-                    debug_log(
-                        "Randomized mutable header fields",
-                        job_id=current_job["job_id"],
-                        extranonce2=extranonce2,
-                        ntime=ntime,
-                        interval_seconds=header_rotate_interval,
-                    )
-
-                if hit:
-                    # A notify/set_extranonce can arrive while the native engine is
-                    # finishing a polling interval. Never submit a hit from an old
-                    # generation under the new job metadata.
+                # A hit always keeps the exact header snapshot that produced it.
+                if found_candidate is not None:
+                    found_snapshot, found = found_candidate
                     latest = globals()["current_job"]()
                     if latest is None or latest["generation"] != current_generation:
-                        logg("[!] Discarding stale native hit: job=%s nonce=%08x" %
-                             (current_job["job_id"], found))
-                        native_engine_stop_job(engine)
+                        logg(
+                            "[!] Discarding stale multi-universe hit: job=%s nonce=%08x universe=%s"
+                            % (found_snapshot["job_id"], found, found_snapshot["universe_id"])
+                        )
+                        for universe in universes:
+                            native_engine_stop_job(universe["engine"])
                         waiting_for_new_job = True
                         continue
+
                     print()
-                    print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                          "==============================================================")
-                    print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                          "  POW CANDIDATE DETECTED; VERIFYING")
-                    print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                          "  job=%s | nonce=%08x | nbits=%s" %
-                          (current_job["job_id"], found, current_job["nbits"]))
-                    print(Style.BRIGHT + Fore.WHITE + Back.GREEN,
-                          "==============================================================")
+                    print(
+                        Style.BRIGHT + Fore.WHITE + Back.GREEN,
+                        "  POW CANDIDATE DETECTED; VERIFYING | universe=%d | nonce=%08x"
+                        % (found_snapshot["universe_id"], found),
+                    )
                     print(Style.RESET_ALL)
-                    logg("[!] POW candidate detected; independent verification pending: job=%s nonce=%08x nbits=%s" %
-                         (current_job["job_id"], found, current_job["nbits"]))
-                    record_pow_status("candidate", current_job["job_id"], found, "native")
-                    # Re-hash the exact header used by native before any network submit.
-                    found_snapshot = dict(current_job)
+                    logg(
+                        "[!] POW candidate detected: job=%s universe=%d nonce=%08x"
+                        % (found_snapshot["job_id"], found_snapshot["universe_id"], found)
+                    )
+                    record_pow_status("candidate", found_snapshot["job_id"], found, "native-multi-universe")
                     try:
                         if not verify_header_pow(
-                            found_snapshot["header_prefix"],
-                            found,
-                            found_snapshot["target"],
+                            found_snapshot["header_prefix"], found, found_snapshot["target"]
                         ):
-                            print(Fore.RED, "[!] Native hit failed independent SHA256d verification; NOT submitting")
-                            logg("[!] Native hit rejected by independent verification: job=%s nonce=%08x" %
-                                 (found_snapshot["job_id"], found))
-                            record_pow_status("verification_failed", found_snapshot["job_id"], found, "native")
-                            debug_log("Target verification failed", engine="native",
-                                      job_id=found_snapshot["job_id"], nonce="%08x" % found,
-                                      target_hex="%064x" % found_snapshot["target"])
-                        else:
-                            logg("[+] SHA256d/target verification PASSED: job=%s nonce=%08x wallet=%s" %
-                                 (found_snapshot["job_id"], found, ADDRESS))
-                            record_pow_status("verified", found_snapshot["job_id"], found, "native")
-                            structured_logger.event(
-                                "pow_candidate_verified", engine="native",
-                                job_id=found_snapshot["job_id"], nonce="%08x" % found,
-                                wallet=ADDRESS, target_hex="%064x" % found_snapshot["target"],
+                            logg(
+                                "[!] Multi-universe candidate failed independent verification; NOT submitting"
                             )
-                            debug_log("Target verification passed", engine="native",
-                                      job_id=found_snapshot["job_id"], nonce="%08x" % found,
-                                      target_hex="%064x" % found_snapshot["target"])
+                            record_pow_status(
+                                "verification_failed", found_snapshot["job_id"], found,
+                                "native-multi-universe",
+                            )
+                        else:
+                            logg(
+                                "[+] SHA256d/target verification PASSED: job=%s universe=%d nonce=%08x"
+                                % (found_snapshot["job_id"], found_snapshot["universe_id"], found)
+                            )
+                            record_pow_status(
+                                "verified", found_snapshot["job_id"], found, "native-multi-universe"
+                            )
+                            structured_logger.event(
+                                "pow_candidate_verified",
+                                engine="native-multi-universe",
+                                job_id=found_snapshot["job_id"],
+                                universe=found_snapshot["universe_id"],
+                                nonce="%08x" % found,
+                                wallet=ADDRESS,
+                                target_hex="%064x" % found_snapshot["target"],
+                            )
                             submit_share(
                                 found_snapshot["job_id"],
                                 found_snapshot["extranonce2"],
@@ -1552,14 +1510,54 @@ def miner_loop():
                             )
                     except Exception as exc:
                         print(Fore.RED, "[!] Share submit failed:", exc)
+                        logg("[!] Share submit failed: %s" % exc)
 
-                    # A pool may not issue another notify after a submitted candidate.
-                    # Rotate extranonce2 and continue hashing the current job instead
-                    # of idling forever; a real new job will still replace this snapshot.
-                    native_engine_stop_job(engine)
+                    for universe in universes:
+                        native_engine_stop_job(universe["engine"])
                     current_generation = None
                     waiting_for_new_job = False
                     continue
+
+                # Rotate exhausted or aged universes independently. Other universes
+                # continue hashing their own headers while this slot is refreshed.
+                used_extranonces = {
+                    item["snapshot"]["extranonce2"]
+                    for item in universes
+                    if item["snapshot"] is not None
+                }
+                for index, universe in enumerate(universes):
+                    exhausted = native_engine_exhausted(universe["engine"])
+                    aged = time.monotonic() - universe["last_rotation"] >= header_rotate_interval
+                    if not exhausted and not aged:
+                        continue
+
+                    previous = universe["snapshot"]
+                    if previous is not None:
+                        used_extranonces.discard(previous["extranonce2"])
+                    snapshot = make_universe_snapshot(job, index, used_extranonces)
+                    if not native_engine_set_job(
+                        universe["engine"], snapshot["header_prefix"], snapshot["target"]
+                    ):
+                        raise RuntimeError(
+                            "Failed to rotate native header universe %d" % index
+                        )
+                    universe["snapshot"] = snapshot
+                    universe["last_rotation"] = time.monotonic()
+                    mining_header_status.update(
+                        job_id=snapshot["job_id"],
+                        extranonce2=snapshot["extranonce2"],
+                        ntime=snapshot["ntime"],
+                        mode="multi-universe + rotational header",
+                    )
+                    debug_log(
+                        "Header universe rotated",
+                        job_id=snapshot["job_id"],
+                        universe=index,
+                        reason="nonce_exhausted" if exhausted else "rotation_interval",
+                        extranonce2=snapshot["extranonce2"],
+                        ntime=snapshot["ntime"],
+                        interval_seconds=header_rotate_interval,
+                    )
 
                 if new_job["generation"] != current_generation:
                     continue
@@ -1568,18 +1566,23 @@ def miner_loop():
                 if now - last_report >= REPORT_INTERVAL:
                     elapsed = max(now - last_report, 0.001)
                     rate = hashes_since_report / elapsed
+                    allocated = max(
+                        (native_engine_next_nonce(item["engine"]) for item in universes),
+                        default=0,
+                    )
                     debug_log(
                         "Mining progress",
-                        engine="native",
-                        job_id=current_job["job_id"],
+                        engine="native-multi-universe",
+                        job_id=job["job_id"],
                         interval_hashes=hashes_since_report,
                         total_hashes=ctx.total_hashes,
                         elapsed_seconds=round(elapsed, 3),
                         hashrate_hs=round(rate, 3),
                         hashrate_mhs=round(rate / 1_000_000, 6),
                         pool_difficulty=ctx.upstream_difficulty,
-                        nonce_allocated_until="%08x" % min(native_engine_next_nonce(engine), 0xFFFFFFFF),
+                        nonce_allocated_until="%08x" % min(allocated, 0xFFFFFFFF),
                         nonce_space=2**32,
+                        universes=universe_count,
                         memory=memory_snapshot(),
                         workers=worker_count_snapshot(CPU_THREADS),
                         elapsed_uptime=metrics.snapshot()["uptime_s"],
@@ -1591,7 +1594,8 @@ def miner_loop():
                 time.sleep(0.01)
 
         finally:
-            native_engine_destroy(engine)
+            for universe in universes:
+                native_engine_destroy(universe["engine"])
         return
 
     workers = []
