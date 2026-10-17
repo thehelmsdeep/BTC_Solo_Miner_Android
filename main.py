@@ -1378,7 +1378,13 @@ def connect_upstream():
 
 
 def miner_loop():
-    if ensure_native() is not None:
+    # Native C is mandatory. Never fall back to Python nonce scanning.
+    native_lib = ensure_native()
+    if native_lib is None:
+        raise RuntimeError(
+            "Native C engine unavailable or disabled; Python mining fallback is disabled"
+        )
+    if native_lib is not None:
         last_report = time.monotonic()
         hashes_since_report = 0
         engine = native_engine_create(b"\x00" * 76, 0)
