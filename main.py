@@ -73,10 +73,6 @@ pow_stats = {
     "last_engine": "",
 }
 
-# Snapshot of the exact header fields currently being hashed.
-hash_input_lock = threading.Lock()
-hash_input_stats = {}
-
 def record_pow_status(status, job_id, nonce, engine):
     """Keep the latest candidate and verification outcome visible on screen."""
     with pow_stats_lock:
@@ -91,33 +87,6 @@ def record_pow_status(status, job_id, nonce, engine):
         pow_stats["last_job"] = str(job_id)
         pow_stats["last_nonce"] = "%08x" % int(nonce)
         pow_stats["last_engine"] = engine
-
-
-def record_hash_inputs(job, extranonce2, engine, ntime=None, header_prefix=None):
-    """Record the actual 76-byte header prefix and variable fields being hashed."""
-    try:
-        active_ntime = ntime or job["ntime"]
-        prefix = header_prefix or build_header_prefix(job, extranonce2, ntime=active_ntime)
-        snapshot = {
-            "job_id": str(job.get("job_id") or "unknown"),
-            "engine": str(engine),
-            "version": str(job.get("version") or ""),
-            "prevhash": str(job.get("prevhash") or ""),
-            "merkle_root": prefix[36:68][::-1].hex(),
-            "ntime": str(active_ntime),
-            "nbits": str(job.get("nbits") or ""),
-            "extranonce2": str(extranonce2),
-            "nonce": "changes continuously (32-bit)",
-            "header_bytes": len(prefix) + 4,
-            "algorithm": "SHA-256d (SHA-256 twice)",
-        }
-        with hash_input_lock:
-            hash_input_stats.clear()
-            hash_input_stats.update(snapshot)
-    except (KeyError, TypeError, ValueError):
-        # Monitoring must never interrupt mining if a snapshot is incomplete.
-        return
-
 
 
 def timer():
@@ -201,22 +170,7 @@ def render_dashboard(rate, interval_hashes=None):
     print("Share Latency: avg %.3fs | max %.3fs" % (average_latency, latency_max))
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
-    with hash_input_lock:
-        active_hash_inputs = dict(hash_input_stats)
-    print("Current Hash Input:")
-    if active_hash_inputs:
-        print("  Algorithm   : %s" % active_hash_inputs.get("algorithm", "SHA-256d"))
-        print("  Engine      : %s" % active_hash_inputs.get("engine", "unknown"))
-        print("  Header Size : %s bytes (76-byte prefix + 4-byte nonce)" % active_hash_inputs.get("header_bytes", 80))
-        print("  Version     : %s" % (active_hash_inputs.get("version") or "unknown"))
-        print("  Prev Block  : %s" % (active_hash_inputs.get("prevhash") or "unknown"))
-        print("  Merkle Root : %s" % (active_hash_inputs.get("merkle_root") or "unknown"))
-        print("  Timestamp   : %s" % (active_hash_inputs.get("ntime") or "unknown"))
-        print("  nBits       : %s" % (active_hash_inputs.get("nbits") or "unknown"))
-        print("  ExtraNonce2 : %s" % (active_hash_inputs.get("extranonce2") or "unknown"))
-        print("  Nonce       : %s" % active_hash_inputs.get("nonce", "changes continuously"))
-    else:
-        print("  Waiting for an active mining job")
+    print("Mining Block Data : Previous Block Hash = %s" % (ctx.prevhash or "waiting for job"))
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
@@ -1375,8 +1329,6 @@ def miner_loop():
                     current_job["extranonce2"] = extranonce2
                     current_job["header_prefix"] = header_prefix
                     current_job["target"] = target
-                    record_hash_inputs(current_job, extranonce2, "native",
-                                       ntime=current_job["ntime"], header_prefix=header_prefix)
                     current_generation = job["generation"]
 
                     print(
@@ -1440,8 +1392,6 @@ def miner_loop():
                         current_job["ntime"] = ntime
                         current_job["header_prefix"] = header_prefix
                         current_job["target"] = target
-                        record_hash_inputs(current_job, current_job["extranonce2"], "native",
-                                           ntime=ntime, header_prefix=header_prefix)
                         message = "[!] Nonce space exhausted; advanced timestamp and resumed the same job"
                     else:
                         # Timestamp window reached: advance the coinbase extranonce,
@@ -1464,8 +1414,6 @@ def miner_loop():
                         current_job["ntime"] = ntime
                         current_job["header_prefix"] = header_prefix
                         current_job["target"] = target
-                        record_hash_inputs(current_job, extranonce2, "native",
-                                           ntime=ntime, header_prefix=header_prefix)
                         message = "[!] Timestamp window exhausted; rotated extranonce2 and resumed the same job"
 
                     print(Fore.YELLOW, message)
@@ -1589,7 +1537,6 @@ def miner_loop():
 
         stop_workers(workers, stop_event) if workers else None
         workers, stop_event, result_queue, extranonce2 = start_workers(job)
-        record_hash_inputs(job, extranonce2, "python")
         debug_log("Python job mining started", job_id=job["job_id"],
                   target_hex="%064x" % compact_to_target(job["nbits"]),
                   target_bits=compact_to_target(job["nbits"]).bit_length(),
