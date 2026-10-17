@@ -75,8 +75,9 @@ pow_stats = {
     "last_engine": "",
 }
 
-# Best observed proof-of-work hash (Python worker only; native engine does not
-# expose per-hash digests, so never present a sampled/reconstructed value as real).
+# Most recently observed real proof-of-work digest for the dashboard.
+# Native mode reports a nonce from a completed scan chunk; Python mode records
+# each digest without logging every hash to disk.
 best_hash_lock = threading.Lock()
 best_hash_stats = {
     "value": None,
@@ -87,15 +88,13 @@ best_hash_stats = {
 }
 
 def record_best_hash(digest, target, job_id, nonce, engine):
-    """Track the numerically lowest real digest observed by a Python worker."""
+    """Record the latest real SHA256d digest and its matching job target."""
     value = int.from_bytes(digest, "little")
     with best_hash_lock:
-        previous = best_hash_stats["value"]
-        if best_hash_stats["job_id"] != str(job_id) or previous is None or value < previous:
-            best_hash_stats.update(
-                value=value, target=int(target), job_id=str(job_id),
-                nonce="%08x" % int(nonce), engine=engine
-            )
+        best_hash_stats.update(
+            value=value, target=int(target), job_id=str(job_id),
+            nonce="%08x" % int(nonce), engine=engine
+        )
 
 # Current header recipe shown in the live dashboard.
 mining_header_status = {
@@ -218,12 +217,14 @@ def render_dashboard(rate, interval_hashes=None):
         best_nonce = best_hash_stats["nonce"]
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
-        # A smaller digest is closer to satisfying Bitcoin proof-of-work.
-        # Express closeness as target / digest, capped at 100%; never hash / target.
-        ratio = 100.0 if best_value <= best_target else (100.0 * best_target / best_value if best_value else 0.0)
-        print("Hash/Target: %.6f%%" % ratio)
+        # Show the latest observed hash's distance to its matching job target.
+        # Scientific notation preserves tiny non-zero percentages instead of
+        # rounding ordinary proof-of-work candidates down to 0.000000%.
+        ratio = 100.0 * best_target / best_value if best_value else 100.0
+        ratio = min(100.0, ratio)
+        print("Hash/Target: %.6g%% (latest hash)" % ratio)
     else:
-        print("Hash/Target: waiting")
+        print("Hash/Target: waiting for hash")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
@@ -739,10 +740,9 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
                 first.update(nonce.to_bytes(4, "little"))
                 digest = sha256(first.digest()).digest()
                 hashes += 1
-                # Publish only occasional improvements to keep dashboard telemetry
-                # from adding a lock acquisition to every hash.
-                if hashes == 1 or (hashes & 1023) == 0:
-                    record_best_hash(digest, target, job["job_id"], nonce, "python")
+                # Keep the dashboard aligned with the latest generated hash.
+                # Do not write per-hash log entries; only update in-memory state.
+                record_best_hash(digest, target, job["job_id"], nonce, "python")
 
                 if int.from_bytes(digest, "little") <= target:
                     record_best_hash(digest, target, job["job_id"], nonce, "python")
