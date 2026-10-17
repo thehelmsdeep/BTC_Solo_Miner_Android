@@ -1162,7 +1162,24 @@ static void engine_scan(BM_ENGINE_ARG *a) {
             return;
         }
 
-        uint64_t start = __atomic_fetch_add(&e->next_nonce, BM_CHUNK, __ATOMIC_RELAXED);
+        /* Reserve work under the same lock used by set_job().
+         * This prevents an old-generation worker from reserving a chunk
+         * after a new job resets next_nonce, then hashing with stale inputs. */
+        engine_lock(e);
+        if (__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) ||
+            __atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) ||
+            !__atomic_load_n(&e->job_ready, __ATOMIC_RELAXED) ||
+            __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) != generation) {
+            engine_unlock(e);
+            return;
+        }
+        uint64_t start = e->next_nonce;
+        if (start < 0x100000000ULL) {
+            uint64_t reserved_end = start + BM_CHUNK;
+            e->next_nonce = reserved_end > 0x100000000ULL
+                ? 0x100000000ULL : reserved_end;
+        }
+        engine_unlock(e);
         if (start >= 0x100000000ULL)
             return;
 
