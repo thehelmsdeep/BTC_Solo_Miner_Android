@@ -74,6 +74,14 @@ pow_stats = {
     "last_engine": "",
 }
 
+# Current header recipe shown in the live dashboard.
+mining_header_status = {
+    "job_id": None,
+    "extranonce2": None,
+    "ntime": None,
+    "mode": "waiting for job",
+}
+
 def record_pow_status(status, job_id, nonce, engine):
     """Keep the latest candidate and verification outcome visible on screen."""
     with pow_stats_lock:
@@ -172,6 +180,12 @@ def render_dashboard(rate, interval_hashes=None):
     print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
     print("Last Job     : %s" % (ctx.job_id or "none"))
     print("Hashing Data : New Block Header (Prev Hash + Merkle Root + Time + nBits + Nonce)")
+    header_status = mining_header_status
+    print("Header Source: %s" % header_status["mode"])
+    print("Header Job   : %s" % (header_status["job_id"] or "waiting"))
+    print("Header Fields: Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
+    print("Active Extra2: %s" % (header_status["extranonce2"] or "waiting"))
+    print("Active ntime : %s" % (header_status["ntime"] or "waiting"))
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
@@ -1339,6 +1353,12 @@ def miner_loop():
                     last_header_rotation = time.monotonic()
                     current_job["target"] = target
                     current_generation = job["generation"]
+                    mining_header_status.update(
+                        job_id=job["job_id"],
+                        extranonce2=extranonce2,
+                        ntime=ntime,
+                        mode="randomized extranonce2 + ntime",
+                    )
 
                     print(
                         Fore.CYAN,
@@ -1407,6 +1427,12 @@ def miner_loop():
                     current_job["header_prefix"] = header_prefix
                     current_job["target"] = target
                     last_header_rotation = time.monotonic()
+                    mining_header_status.update(
+                        job_id=current_job["job_id"],
+                        extranonce2=extranonce2,
+                        ntime=ntime,
+                        mode="randomized extranonce2 + ntime",
+                    )
                     message = "[!] Nonce space exhausted; randomized extranonce2/ntime and resumed the same job"
                     print(Fore.YELLOW, message)
                     logg(message)
@@ -1435,6 +1461,12 @@ def miner_loop():
                     current_job["header_prefix"] = header_prefix
                     current_job["target"] = target
                     last_header_rotation = time.monotonic()
+                    mining_header_status.update(
+                        job_id=current_job["job_id"],
+                        extranonce2=extranonce2,
+                        ntime=ntime,
+                        mode="randomized extranonce2 + ntime",
+                    )
                     debug_log(
                         "Randomized mutable header fields",
                         job_id=current_job["job_id"],
