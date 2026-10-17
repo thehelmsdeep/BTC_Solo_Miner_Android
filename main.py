@@ -182,6 +182,8 @@ def render_dashboard(rate, interval_hashes=None):
     print("Hashing Data : New Block Header (Prev Hash + Merkle Root + Time + nBits + Nonce)")
     header_status = mining_header_status
     print("Header Source: %s" % header_status["mode"])
+    print("Variable Now : Nonce (changes on every hash)")
+    print("Header Rotate: extranonce2 + ntime (periodic)")
     print("Header Job   : %s" % (header_status["job_id"] or "waiting"))
     print("Header Fields: Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
     print("Active Extra2: %s" % (header_status["extranonce2"] or "waiting"))
