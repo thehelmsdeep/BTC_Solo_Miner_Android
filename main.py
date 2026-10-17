@@ -437,7 +437,7 @@ def ensure_native():
             print(Fore.GREEN, f"[*] Native SHA256 engine built with {pathlib.Path(compiler).name}: {' '.join(flags)}")
         except (OSError, subprocess.CalledProcessError) as exc:
             detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
-            message = "[!] Native build unavailable; native C engine required; Python PoW hashing is disabled: %s" % detail
+            message = "[!] Native build unavailable; Python PoW hashing is disabled: %s" % detail
             print(Fore.YELLOW, message)
             logg(message)
             return None
@@ -493,7 +493,7 @@ def ensure_native():
         # Do not use "if not ..." here: that incorrectly treats PASS (0) as failure.
         selftest = lib.b_m_selftest()
         if selftest != 0:
-            print(Fore.RED, "[!] Native SHA256 self-test FAILED (code=%d); using Python SHA256 fallback" % selftest)
+            print(Fore.RED, "[!] Native SHA256 self-test FAILED (code=%d); native mining is disabled" % selftest)
             debug_log("Self-test failed", test="native_sha256", return_code=selftest)
             return None
         print(Fore.GREEN, "[*] Native SHA256 self-test: PASS")
@@ -509,7 +509,7 @@ def ensure_native():
         _native=lib
         return lib
     except OSError as exc:
-        message = "[!] Native engine load failed; using Python fallback: %s" % exc
+        message = "[!] Native engine load failed; Python PoW hashing is disabled: %s" % exc
         print(Fore.YELLOW, message)
         logg(message)
         return None
