@@ -219,10 +219,9 @@ def render_dashboard(rate, interval_hashes=None):
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
         ratio = 100.0 * best_value / best_target
-        print("Observed Hash/Target: %.6f%% (%s)" % (ratio, "VALID" if best_value <= best_target else "above target"))
-        print("Observed Hash   : %s | Job: %s | Engine: %s" % (best_nonce, best_job, best_engine))
+        print("Hash/Target: %.6f%%" % ratio)
     else:
-        print("Observed Hash/Target: waiting for completed native nonce chunk")
+        print("Hash/Target: waiting")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
