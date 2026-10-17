@@ -1048,7 +1048,8 @@ typedef struct { BM_ENGINE *engine; uint32_t id; } BM_ENGINE_ARG;
 struct BM_ENGINE {
     uint32_t thread_count;
     uint64_t job_generation;
-    uint64_t next_nonce;
+    uint64_t next_nonce; /* logical offset; atomically allocates disjoint chunks */
+    uint32_t nonce_start; /* aligned cyclic base for this job's 32-bit nonce space */
     uint64_t total_hashes;
     int job_ready;
     int stop_job;
@@ -1137,6 +1138,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
     uint32_t target_words[8];
     uint32_t job_tail0, job_tail1, job_tail2;
     uint64_t generation;
+    uint32_t nonce_start;
 
     engine_lock(e);
     memcpy(prefix, e->prefix, 76);
@@ -1148,6 +1150,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
     job_tail0 = e->job_tail_words[0];
     job_tail1 = e->job_tail_words[1];
     job_tail2 = e->job_tail_words[2];
+    nonce_start = e->nonce_start;
     generation = __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED);
     engine_unlock(e);
 
@@ -1173,8 +1176,8 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86_FP)
 #if defined(__AVX2__)
         for (; n + 8 <= end; n += 8) {
-            uint32_t nonces[8]={(uint32_t)n,(uint32_t)n+1U,(uint32_t)n+2U,(uint32_t)n+3U,
-                                (uint32_t)n+4U,(uint32_t)n+5U,(uint32_t)n+6U,(uint32_t)n+7U};
+            uint32_t nonces[8]={(uint32_t)(nonce_start+n),(uint32_t)(nonce_start+n+1U),(uint32_t)(nonce_start+n+2U),(uint32_t)(nonce_start+n+3U),
+                                (uint32_t)(nonce_start+n+4U),(uint32_t)(nonce_start+n+5U),(uint32_t)(nonce_start+n+6U),(uint32_t)(nonce_start+n+7U)};
             uint8_t hits[8];
             sha256_8_hashes(&base,tail0,tail1,tail2,nonces,target_words,hits);
             local += 8;
@@ -1205,7 +1208,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #endif
         for (; n + 4 <= end; n += 4) {
-            uint32_t nonces[4]={(uint32_t)n,(uint32_t)n+1U,(uint32_t)n+2U,(uint32_t)n+3U};
+            uint32_t nonces[4]={(uint32_t)(nonce_start+n),(uint32_t)(nonce_start+n+1U),(uint32_t)(nonce_start+n+2U),(uint32_t)(nonce_start+n+3U)};
             uint8_t hits[4];
             sha256_4_hashes(&base,tail0,tail1,tail2,nonces,target_words,hits);
             local += 4;
@@ -1241,18 +1244,18 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #if defined(BTC_MINER_ARM64_OCTO)
         for (; n + 7 < end; n += 8) {
             unsigned hits = hash_nonce_arm_octo_words(&base, tail0, tail1, tail2,
-                target_words, (uint32_t)n, (uint32_t)(n + 1), (uint32_t)(n + 2),
-                (uint32_t)(n + 3), (uint32_t)(n + 4), (uint32_t)(n + 5),
-                (uint32_t)(n + 6), (uint32_t)(n + 7));
+                target_words, (uint32_t)(nonce_start+n), (uint32_t)(nonce_start+n+1), (uint32_t)(nonce_start+n+2),
+                (uint32_t)(nonce_start+n+3), (uint32_t)(nonce_start+n+4), (uint32_t)(nonce_start+n+5),
+                (uint32_t)(nonce_start+n+6), (uint32_t)(nonce_start+n+7));
             local += 8;
             if (hits) {
-                uint32_t found_nonce = (hits & 1U) ? (uint32_t)n :
-                    (hits & 2U) ? (uint32_t)(n + 1) :
-                    (hits & 4U) ? (uint32_t)(n + 2) :
-                    (hits & 8U) ? (uint32_t)(n + 3) :
-                    (hits & 16U) ? (uint32_t)(n + 4) :
-                    (hits & 32U) ? (uint32_t)(n + 5) :
-                    (hits & 64U) ? (uint32_t)(n + 6) : (uint32_t)(n + 7);
+                uint32_t found_nonce = (hits & 1U) ? (uint32_t)(nonce_start+n) :
+                    (hits & 2U) ? (uint32_t)(nonce_start+n+1) :
+                    (hits & 4U) ? (uint32_t)(nonce_start+n+2) :
+                    (hits & 8U) ? (uint32_t)(nonce_start+n+3) :
+                    (hits & 16U) ? (uint32_t)(nonce_start+n+4) :
+                    (hits & 32U) ? (uint32_t)(nonce_start+n+5) :
+                    (hits & 64U) ? (uint32_t)(nonce_start+n+6) : (uint32_t)(nonce_start+n+7);
                 if (!verify_nonce_reference(prefix, target, found_nonce)) continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
@@ -1279,13 +1282,13 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         /* Four independent SHA256d candidates are staged together. */
         for (; n + 3 < end; n += 4) {
             unsigned hits = hash_nonce_arm_quad_words(&base, tail0, tail1, tail2,
-                target_words, (uint32_t)n, (uint32_t)(n + 1),
-                (uint32_t)(n + 2), (uint32_t)(n + 3));
+                target_words, (uint32_t)(nonce_start+n), (uint32_t)(nonce_start+n+1),
+                (uint32_t)(nonce_start+n+2), (uint32_t)(nonce_start+n+3));
             local += 4;
             if (hits) {
-                uint32_t found_nonce = (hits & 1U) ? (uint32_t)n :
-                    (hits & 2U) ? (uint32_t)(n + 1) :
-                    (hits & 4U) ? (uint32_t)(n + 2) : (uint32_t)(n + 3);
+                uint32_t found_nonce = (hits & 1U) ? (uint32_t)(nonce_start+n) :
+                    (hits & 2U) ? (uint32_t)(nonce_start+n+1) :
+                    (hits & 4U) ? (uint32_t)(nonce_start+n+2) : (uint32_t)(nonce_start+n+3);
                 if (!verify_nonce_reference(prefix, target, found_nonce)) continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
@@ -1312,11 +1315,11 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         /* Two independent nonce pipelines per iteration. */
         for (; n + 1 < end; n += 2) {
             unsigned hits = hash_nonce_arm_pair_words(&base, tail0, tail1, tail2,
-                                                       target_words, (uint32_t)n,
-                                                       (uint32_t)(n + 1));
+                                                       target_words, (uint32_t)(nonce_start+n),
+                                                       (uint32_t)(nonce_start+n+1));
             local += 2;
             if (hits) {
-                uint32_t found_nonce = (hits & 1U) ? (uint32_t)n : (uint32_t)(n + 1);
+                uint32_t found_nonce = (hits & 1U) ? (uint32_t)(nonce_start+n) : (uint32_t)(nonce_start+n+1);
                 if (!verify_nonce_reference(prefix, target, found_nonce)) continue;
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
@@ -1341,12 +1344,12 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #endif
         for (; n < end; ++n) {
-            if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)n) &&
-                verify_nonce_reference(prefix, target, (uint32_t)n)) {
+            if (hash_nonce_arm_words(&base, tail0, tail1, tail2, target_words, (uint32_t)(nonce_start+n)) &&
+                verify_nonce_reference(prefix, target, (uint32_t)(nonce_start+n))) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
-                    e->found_nonce=(uint32_t)n;
+                    e->found_nonce=(uint32_t)(nonce_start+n);
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
                 }
                 engine_unlock(e);
@@ -1357,7 +1360,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         }
 #else
         for (; n < end; ++n) {
-            if (hash_nonce(prefix, &base, target, (uint32_t)n) &&
+            if (hash_nonce(prefix, &base, target, (uint32_t)(nonce_start+n)) &&
                 verify_nonce_reference(prefix, target, (uint32_t)n)) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
@@ -1392,7 +1395,7 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         if (!__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) &&
             !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) &&
             __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
-            e->sample_nonce = (uint32_t)(end - 1);
+            e->sample_nonce = (uint32_t)(nonce_start + end - 1);
             e->sample_valid = 1;
         }
         engine_unlock(e);
@@ -1546,12 +1549,24 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
                                    ((uint32_t)target[i*4+3] << 24);
     }
 
+    uint32_t rotation_seed = 2166136261U;
+    for (int i = 0; i < 76; ++i)
+        rotation_seed = (rotation_seed ^ prefix[i]) * 16777619U;
+    rotation_seed ^= (uint32_t)(uintptr_t)e;
+    rotation_seed ^= rotation_seed >> 16;
+    rotation_seed *= 0x7feb352dU;
+    rotation_seed ^= rotation_seed >> 15;
+    /* BM_CHUNK is 2^20, so this aligned rotation preserves chunk boundaries
+     * while mapping the full logical scan onto every 32-bit nonce exactly once. */
+    uint32_t rotated_nonce_start = rotation_seed & ~(uint32_t)(BM_CHUNK - 1ULL);
+
     engine_lock(e);
     memcpy(e->prefix, prefix, 76);
     memcpy(e->target, target, 32);
     e->job_midstate = prepared_midstate;
     memcpy(e->job_tail_words, prepared_tail, sizeof(prepared_tail));
     memcpy(e->job_target_words, prepared_target_words, sizeof(prepared_target_words));
+    e->nonce_start = rotated_nonce_start;
     __atomic_add_fetch(&e->job_generation, 1, __ATOMIC_RELAXED);
     __atomic_store_n(&e->next_nonce, 0, __ATOMIC_RELAXED);
     __atomic_store_n(&e->total_hashes, 0, __ATOMIC_RELAXED);
