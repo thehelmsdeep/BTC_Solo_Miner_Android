@@ -200,6 +200,9 @@ def render_dashboard(rate, interval_hashes=None):
     print("Mining Time       : %s" % structured_logger.dashboard_snapshot()["mining_duration"])
     print("Hashrate          : %s MH/s" % format(rate / 1_000_000, ",.6f"))
     print("Total Hashes      : %s" % format(ctx.total_hashes, ","))
+    with best_hash_lock:
+        best_value = best_hash_stats["value"]
+        best_target = best_hash_stats["target"]
     print("Best Hash Quality : %s" % ("%.12g%%" % min(100.0, (best_target / best_value) * 100.0) if best_value is not None and best_target else "waiting for hash"))
     print("Target Status     : %s" % (("VALID (hash <= target)" if best_value <= best_target else "above target") if best_value is not None and best_target else "waiting for hash"))
     print("")
