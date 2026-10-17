@@ -2,7 +2,6 @@ import ctypes
 import hashlib
 import json
 import logging
-import multiprocessing as mp
 import queue
 import os
 import secrets
@@ -356,7 +355,7 @@ def ensure_native():
     else:
         compiler = shutil.which(requested_cc)
     if not compiler:
-        message = f"[!] C compiler {requested_cc!r} unavailable; using Python SHA256 fallback"
+        message = f"[!] C compiler {requested_cc!r} unavailable; native C engine required; Python PoW hashing is disabled"
         print(Fore.YELLOW, message)
         logg(message)
         return None
@@ -438,7 +437,7 @@ def ensure_native():
             print(Fore.GREEN, f"[*] Native SHA256 engine built with {pathlib.Path(compiler).name}: {' '.join(flags)}")
         except (OSError, subprocess.CalledProcessError) as exc:
             detail = exc.stderr.strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
-            message = "[!] Native build unavailable; using Python fallback: %s" % detail
+            message = "[!] Native build unavailable; native C engine required; Python PoW hashing is disabled: %s" % detail
             print(Fore.YELLOW, message)
             logg(message)
             return None
@@ -466,6 +465,11 @@ def ensure_native():
         lib.b_m_engine_exhausted.restype = ctypes.c_int
         lib.b_m_engine_sample_nonce.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
         lib.b_m_engine_sample_nonce.restype = ctypes.c_int
+        # All proof-of-work SHA256d digests are computed in native C.
+        lib.b_m_debug_sha256d_optimized.argtypes = [
+            byte_ptr, ctypes.c_uint32, byte_ptr
+        ]
+        lib.b_m_debug_sha256d_optimized.restype = None
         lib.b_m_engine_next_nonce.argtypes = [ctypes.c_void_p]
         lib.b_m_engine_next_nonce.restype = ctypes.c_uint64
 
@@ -585,15 +589,24 @@ def native_engine_stop_job(engine):
         lib.b_m_engine_stop_job(engine)
 
 
-def verify_header_pow(header_prefix, nonce, target):
-    """Independently verify the exact 80-byte header before submission."""
+def native_sha256d(header_prefix, nonce):
+    """Return a proof-of-work digest computed by native C, never Python."""
     if len(header_prefix) != 76:
         raise ValueError("Invalid header prefix length")
     if not 0 <= nonce <= 0xFFFFFFFF:
         raise ValueError("Invalid nonce")
-    header = header_prefix + nonce.to_bytes(4, "little")
-    digest = double_sha256(header)
-    return int.from_bytes(digest, "little") <= target
+    lib = ensure_native()
+    if lib is None:
+        raise RuntimeError("Native C SHA256 engine unavailable; Python hashing is disabled")
+    prefix = (ctypes.c_uint8 * 76).from_buffer_copy(header_prefix)
+    digest = (ctypes.c_uint8 * 32)()
+    lib.b_m_debug_sha256d_optimized(prefix, ctypes.c_uint32(nonce), digest)
+    return bytes(digest)
+
+
+def verify_header_pow(header_prefix, nonce, target):
+    """Verify a native-computed digest before submission; never hash in Python."""
+    return int.from_bytes(native_sha256d(header_prefix, nonce), "little") <= target
 
 
 def native_engine_destroy(engine=None):
@@ -721,107 +734,25 @@ def build_header_prefix(job, extranonce2, ntime=None, version=None):
     return header
 
 
-def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue, nonce_offset=0):
-    try:
-        header_prefix = build_header_prefix(job, extranonce2)
-        target = compact_to_target(job["nbits"])
-        started = time.monotonic()
-        last_report = started
-        reported_hashes = 0
-        result_queue.put(("worker_start", worker_id, job["job_id"], target, len(header_prefix)))
-
-        sha256 = hashlib.sha256
-        base = sha256(header_prefix[:64])
-        tail = header_prefix[64:]
-        # Walk a rotated logical nonce space. Worker i owns logical counters
-        # i, i + worker_count, ...; adding one shared random offset rotates the
-        # full 32-bit space without overlap, including across the uint32 wrap.
-        nonce = worker_id
-        hashes = 0
-        worker_count = max(1, CPU_THREADS)
-        nonce_limit = 0x100000000
-
-        while not stop_event.is_set() and nonce < nonce_limit:
-            end_nonce = min(
-                nonce + NONCE_BATCH * worker_count,
-                nonce_limit
-            )
-            while nonce < end_nonce and not stop_event.is_set():
-                actual_nonce = (nonce_offset + nonce) & 0xFFFFFFFF
-                first = base.copy()
-                first.update(tail)
-                first.update(actual_nonce.to_bytes(4, "little"))
-                digest = sha256(first.digest()).digest()
-                hashes += 1
-                # Keep the dashboard aligned with the latest generated hash.
-                # Do not write per-hash log entries; only update in-memory state.
-                record_best_hash(digest, target, job["job_id"], actual_nonce, "python")
-
-                if int.from_bytes(digest, "little") <= target:
-                    record_best_hash(digest, target, job["job_id"], actual_nonce, "python")
-                    result_queue.put((
-                        "found", actual_nonce, job["job_id"], job["ntime"], hashes - reported_hashes
-                    ))
-                    stop_event.set()
-                    return
-                nonce += CPU_THREADS
-                now = time.monotonic()
-                if now - last_report >= REPORT_INTERVAL:
-                    delta = hashes - reported_hashes
-                    if delta:
-                        result_queue.put(("worker_progress", worker_id, (nonce_offset + nonce) & 0xFFFFFFFF, delta, round(now - last_report, 3)))
-                        reported_hashes = hashes
-                    last_report = now
-
-        if hashes > reported_hashes:
-            result_queue.put(("progress", worker_id, hashes - reported_hashes))
-        result_queue.put(("worker_stop", worker_id, hashes, round(time.monotonic() - started, 3)))
-    except Exception as exc:
-        result_queue.put(("error", worker_id, str(exc)))
+def cpu_worker(*args, **kwargs):
+    """Disabled legacy entry point: proof-of-work scanning must run in C."""
+    raise RuntimeError("Python PoW worker is disabled; use the persistent native C engine")
 
 
 def stop_workers(workers, stop_event):
-    if not workers:
-        return
-    stop_event.set()
-    for process in workers:
+    """Stop legacy worker handles; no Python PoW workers may be started."""
+    if stop_event is not None:
+        stop_event.set()
+    for process in workers or ():
         process.join(timeout=1)
-    for process in workers:
         if process.is_alive():
             process.terminate()
             process.join(timeout=1)
 
 
 def start_workers(job):
-    stop_event = mp.Event()
-    result_queue = mp.Queue()
-    workers = []
-
-    extranonce2_size = int(job["extranonce2_size"])
-    if extranonce2_size <= 0:
-        raise RuntimeError("Invalid upstream extranonce2_size")
-
-    mask = (1 << (8 * extranonce2_size)) - 1
-    extranonce2 = (time.time_ns() & mask).to_bytes(
-        extranonce2_size, "big"
-    ).hex()
-
-    worker_count = 1 if ensure_native() is not None else CPU_THREADS
-    # One rotation per worker set. Combined with disjoint logical strides,
-    # this changes the starting point without losing or duplicating any nonce.
-    nonce_offset = secrets.randbits(32)
-
-    for worker_id in range(worker_count):
-        process = mp.Process(
-            target=cpu_worker,
-            args=(worker_id, job, extranonce2, stop_event, result_queue, nonce_offset),
-            daemon=True,
-        )
-        process.start()
-        workers.append(process)
-        debug_log("Worker process started", worker_id=worker_id, pid=process.pid, job_id=job["job_id"])
-
-    return workers, stop_event, result_queue, extranonce2
+    """Disabled legacy entry point: never start a Python nonce scanner."""
+    raise RuntimeError("Python mining is disabled; use miner_loop() with the native C engine")
 
 
 def submit_payload(job_id, extranonce2, ntime, nonce, submit_id):
@@ -1470,9 +1401,8 @@ def miner_loop():
                 # chunk. Recompute its real SHA256d digest for dashboard telemetry.
                 sampled_nonce = native_engine_sample_nonce(engine)
                 if sampled_nonce is not None:
-                    sampled_header = header_prefix + int(sampled_nonce).to_bytes(4, "little")
-                    sampled_digest = hashlib.sha256(hashlib.sha256(sampled_header).digest()).digest()
-                    record_best_hash(sampled_digest, target, job["job_id"], sampled_nonce, "native-sampled")
+                    sampled_digest = native_sha256d(header_prefix, int(sampled_nonce))
+                    record_best_hash(sampled_digest, target, job["job_id"], sampled_nonce, "native-C")
                 # Account for the final completed nonce chunk even when the engine
                 # reports exhaustion in the same polling interval.
                 if hashes:
