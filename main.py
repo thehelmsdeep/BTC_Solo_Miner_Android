@@ -1479,10 +1479,10 @@ def miner_loop():
                     base_ntime = current_job.get("base_ntime", current_job["ntime"])
                     base_time = int(base_ntime, 16)
                     now_limit = min(0xFFFFFFFF, int(time.time()))
-                    ntime_value = (
-                        secrets.randbelow(now_limit - base_time + 1) + base_time
-                        if now_limit >= base_time else base_time
-                    )
+                    # Roll ntime forward deterministically within the current-time
+                    # limit; avoid random backward jumps and repeated timestamps.
+                    previous_ntime = int(current_job.get("ntime", base_ntime), 16)
+                    ntime_value = min(now_limit, max(base_time, previous_ntime + 1))
                     ntime = "%08x" % ntime_value
                     header_prefix = build_header_prefix(
                         current_job, extranonce2, ntime=ntime
