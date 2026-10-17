@@ -1056,6 +1056,8 @@ struct BM_ENGINE {
     int shutdown;
     int found_valid;
     uint32_t found_nonce;
+    int sample_valid;
+    uint32_t sample_nonce;
     uint8_t prefix[76];
     uint8_t target[32];
     /* Per-job SHA-256 preparation shared by all persistent workers. */
@@ -1384,6 +1386,17 @@ static void engine_scan(BM_ENGINE_ARG *a) {
         if (local)
             __atomic_fetch_add(&e->total_hashes, local, __ATOMIC_RELAXED);
 
+        /* Publish a nonce only after its chunk was actually scanned. The UI
+         * recomputes this digest against the same active header. */
+        engine_lock(e);
+        if (!__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) &&
+            !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) &&
+            __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
+            e->sample_nonce = (uint32_t)(end - 1);
+            e->sample_valid = 1;
+        }
+        engine_unlock(e);
+
         if (end >= 0x100000000ULL) {
             engine_lock(e);
             if (!e->found_valid && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
@@ -1544,6 +1557,8 @@ int b_m_engine_set_job(BM_ENGINE *e, const uint8_t prefix[76], const uint8_t tar
     __atomic_store_n(&e->total_hashes, 0, __ATOMIC_RELAXED);
     e->found_valid = 0;
     e->found_nonce = 0;
+    e->sample_valid = 0;
+    e->sample_nonce = 0;
     __atomic_store_n(&e->stop_job, 0, __ATOMIC_RELAXED);
     e->exhausted = 0;
     __atomic_store_n(&e->job_ready, 1, __ATOMIC_RELAXED);
@@ -1560,6 +1575,15 @@ int b_m_engine_poll(BM_ENGINE *e, uint32_t *found, uint64_t *hashes) {
     if (hit) *found = e->found_nonce;
     engine_unlock(e);
     return hit;
+}
+
+int b_m_engine_sample_nonce(BM_ENGINE *e, uint32_t *nonce) {
+    if (!e || !nonce) return 0;
+    engine_lock(e);
+    int valid = e->sample_valid;
+    if (valid) *nonce = e->sample_nonce;
+    engine_unlock(e);
+    return valid;
 }
 
 int b_m_engine_exhausted(BM_ENGINE *e) {
