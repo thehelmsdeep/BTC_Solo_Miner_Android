@@ -1371,51 +1371,41 @@ def miner_loop():
 
                 # Preserve a hit even if its final nonce chunk also exhausts the nonce space.
                 if native_engine_exhausted(engine) and not hit:
+                    # Each complete 32-bit nonce range gets a fresh coinbase
+                    # extranonce, which changes the Merkle root and therefore
+                    # creates a new header search space without walking time
+                    # forward thousands of times on the same coinbase.
                     extranonce2_size = int(current_job["extranonce2_size"])
                     mask = (1 << (8 * extranonce2_size)) - 1
+                    current_extranonce = int(current_job["extranonce2"], 16)
+                    if current_extranonce >= mask:
+                        logg("[!] Extranonce space exhausted; waiting for a new Stratum job")
+                        native_engine_stop_job(engine)
+                        waiting_for_new_job = True
+                        current_generation = None
+                        continue
+
+                    next_extranonce = current_extranonce + 1
+                    extranonce2 = next_extranonce.to_bytes(extranonce2_size, "big").hex()
+                    # Keep the job's supplied timestamp unless it is no longer
+                    # within the Stratum future-time allowance; never submit a
+                    # timestamp that was not used to build this exact header.
                     base_ntime = current_job.get("base_ntime", current_job["ntime"])
                     now_limit = min(0xFFFFFFFF, int(time.time()) + 7200)
                     current_time = int(current_job["ntime"], 16)
+                    ntime = current_job["ntime"] if current_time <= now_limit else base_ntime
+                    header_prefix = build_header_prefix(
+                        current_job, extranonce2, ntime=ntime
+                    )
+                    target = compact_to_target(current_job["nbits"])
+                    if not native_engine_set_job(engine, header_prefix, target):
+                        raise RuntimeError("Failed to restart native engine after extranonce rotation")
 
-                    # Search each permitted timestamp for the current coinbase
-                    # before moving the extranonce. Previous-block hash and nBits
-                    # remain fixed to the Stratum job.
-                    if current_time < now_limit:
-                        next_time = current_time + 1
-                        ntime = "%08x" % next_time
-                        header_prefix = build_header_prefix(
-                            current_job, current_job["extranonce2"], ntime=ntime
-                        )
-                        target = compact_to_target(current_job["nbits"])
-                        if not native_engine_set_job(engine, header_prefix, target):
-                            raise RuntimeError("Failed to restart native engine after timestamp roll")
-                        current_job["ntime"] = ntime
-                        current_job["header_prefix"] = header_prefix
-                        current_job["target"] = target
-                        message = "[!] Nonce space exhausted; advanced timestamp and resumed the same job"
-                    else:
-                        # Timestamp window reached: advance the coinbase extranonce,
-                        # which changes the Merkle root, then restart at the job time.
-                        next_extranonce = (int(current_job["extranonce2"], 16) + 1) & mask
-                        if next_extranonce == int(current_job["extranonce2"], 16):
-                            logg("[!] Extranonce space exhausted; waiting for a new Stratum job")
-                            native_engine_stop_job(engine)
-                            waiting_for_new_job = True
-                            continue
-                        extranonce2 = next_extranonce.to_bytes(extranonce2_size, "big").hex()
-                        ntime = base_ntime
-                        header_prefix = build_header_prefix(
-                            current_job, extranonce2, ntime=ntime
-                        )
-                        target = compact_to_target(current_job["nbits"])
-                        if not native_engine_set_job(engine, header_prefix, target):
-                            raise RuntimeError("Failed to restart native engine after extranonce rotation")
-                        current_job["extranonce2"] = extranonce2
-                        current_job["ntime"] = ntime
-                        current_job["header_prefix"] = header_prefix
-                        current_job["target"] = target
-                        message = "[!] Timestamp window exhausted; rotated extranonce2 and resumed the same job"
-
+                    current_job["extranonce2"] = extranonce2
+                    current_job["ntime"] = ntime
+                    current_job["header_prefix"] = header_prefix
+                    current_job["target"] = target
+                    message = "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job"
                     print(Fore.YELLOW, message)
                     logg(message)
                     continue
