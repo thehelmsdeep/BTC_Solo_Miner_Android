@@ -1361,11 +1361,11 @@ static void engine_scan(BM_ENGINE_ARG *a) {
 #else
         for (; n < end; ++n) {
             if (hash_nonce(prefix, &base, target, (uint32_t)(nonce_start+n)) &&
-                verify_nonce_reference(prefix, target, (uint32_t)n)) {
+                verify_nonce_reference(prefix, target, (uint32_t)(nonce_start+n))) {
                 engine_lock(e);
                 if (!e->found_valid && !__atomic_load_n(&e->stop_job, __ATOMIC_RELAXED) && !__atomic_load_n(&e->shutdown, __ATOMIC_RELAXED) && __atomic_load_n(&e->job_generation, __ATOMIC_RELAXED) == generation) {
                     e->found_valid=1;
-                    e->found_nonce=(uint32_t)n;
+                    e->found_nonce=(uint32_t)(nonce_start+n);
                     __atomic_store_n(&e->stop_job, 1, __ATOMIC_RELAXED);
                 }
                 engine_unlock(e);
