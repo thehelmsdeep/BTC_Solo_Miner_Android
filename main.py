@@ -75,8 +75,8 @@ pow_stats = {
 }
 
 # Best observed digest normalized against its own job target.
-# Native mode currently samples one nonce per completed scan chunk, so this is
-# the best OBSERVED sample, not a guarantee of the best digest among every hash.
+# Native mode samples one nonce per completed scan chunk, so this is the best
+# OBSERVED sample, not a guarantee of the best digest among every computed hash.
 best_hash_lock = threading.Lock()
 best_hash_stats = {
     "value": None,
@@ -225,17 +225,13 @@ def render_dashboard(rate, interval_hashes=None):
         best_nonce = best_hash_stats["nonce"]
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
-        # Hash/target is the direct, interpretable ratio: <= 100% meets target;
-        # > 100% is above target. Do not cap it or call it "closeness".
-        ratio = 100.0 * best_value / best_target
-        print("Best Observed Hash/Target: %.8g%%" % ratio)
-        print("Best Hash Value : %064x" % best_value)
-        print("Best Hash Target: %064x" % best_target)
-        print("Best Hash Job   : %s" % (best_job or "unknown"))
-        print("Best Hash Nonce : %s" % (best_nonce or "unknown"))
-        print("Best Hash Engine: %s" % (best_engine or "unknown"))
+        # Keep the dashboard concise and avoid presenting an unbounded ratio as
+        # a misleading "closeness" percentage.
+        print("Best Hash       : %064x" % best_value)
+        print("Target Status   : %s" % ("VALID (hash <= target)" if best_value <= best_target else "above target"))
     else:
-        print("Best Observed Hash/Target: waiting for hash")
+        print("Best Hash       : waiting for hash")
+        print("Target Status   : waiting for hash")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
