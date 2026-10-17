@@ -75,6 +75,28 @@ pow_stats = {
     "last_engine": "",
 }
 
+# Best observed proof-of-work hash (Python worker only; native engine does not
+# expose per-hash digests, so never present a sampled/reconstructed value as real).
+best_hash_lock = threading.Lock()
+best_hash_stats = {
+    "value": None,
+    "target": None,
+    "job_id": None,
+    "nonce": None,
+    "engine": None,
+}
+
+def record_best_hash(digest, target, job_id, nonce, engine):
+    """Track the numerically lowest real digest observed by a Python worker."""
+    value = int.from_bytes(digest, "little")
+    with best_hash_lock:
+        previous = best_hash_stats["value"]
+        if best_hash_stats["job_id"] != str(job_id) or previous is None or value < previous:
+            best_hash_stats.update(
+                value=value, target=int(target), job_id=str(job_id),
+                nonce="%08x" % int(nonce), engine=engine
+            )
+
 # Current header recipe shown in the live dashboard.
 mining_header_status = {
     "job_id": None,
@@ -189,6 +211,18 @@ def render_dashboard(rate, interval_hashes=None):
     print("Header Fields: Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
     print("Active Extra2: %s" % (header_status["extranonce2"] or "waiting"))
     print("Active ntime : %s" % (header_status["ntime"] or "waiting"))
+    with best_hash_lock:
+        best_value = best_hash_stats["value"]
+        best_target = best_hash_stats["target"]
+        best_job = best_hash_stats["job_id"]
+        best_nonce = best_hash_stats["nonce"]
+        best_engine = best_hash_stats["engine"]
+    if best_value is not None and best_target:
+        ratio = 100.0 * best_value / best_target
+        print("Best Hash/Target: %.6f%% (%s)" % (ratio, "VALID" if best_value <= best_target else "above target"))
+        print("Best Hash Nonce : %s | Job: %s | Engine: %s" % (best_nonce, best_job, best_engine))
+    else:
+        print("Best Hash/Target: waiting for real digest telemetry")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
@@ -692,8 +726,13 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue):
                 first.update(nonce.to_bytes(4, "little"))
                 digest = sha256(first.digest()).digest()
                 hashes += 1
+                # Publish only occasional improvements to keep dashboard telemetry
+                # from adding a lock acquisition to every hash.
+                if hashes == 1 or (hashes & 1023) == 0:
+                    record_best_hash(digest, target, job["job_id"], nonce, "python")
 
                 if int.from_bytes(digest, "little") <= target:
+                    record_best_hash(digest, target, job["job_id"], nonce, "python")
                     result_queue.put((
                         "found", nonce, job["job_id"], job["ntime"], hashes - reported_hashes
                     ))
