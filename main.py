@@ -758,7 +758,7 @@ def cpu_worker(worker_id, job, extranonce2, stop_event, result_queue, nonce_offs
                 record_best_hash(digest, target, job["job_id"], actual_nonce, "python")
 
                 if int.from_bytes(digest, "little") <= target:
-                    record_best_hash(digest, target, job["job_id"], nonce, "python")
+                    record_best_hash(digest, target, job["job_id"], actual_nonce, "python")
                     result_queue.put((
                         "found", actual_nonce, job["job_id"], job["ntime"], hashes - reported_hashes
                     ))
