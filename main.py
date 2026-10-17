@@ -225,13 +225,14 @@ def render_dashboard(rate, interval_hashes=None):
         best_nonce = best_hash_stats["nonce"]
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
-        # Keep the dashboard concise and avoid presenting an unbounded ratio as
-        # a misleading "closeness" percentage.
-        print("Best Hash       : %064x" % best_value)
-        print("Target Status   : %s" % ("VALID (hash <= target)" if best_value <= best_target else "above target"))
+        # Bounded display score: 100 * target/hash, capped at 100%.
+        # This is an intuitive target-relative score, not mining probability.
+        quality = min(100.0, (best_target / best_value) * 100.0)
+        print("Best Hash Quality: %.12g%%" % quality)
+        print("Target Status    : %s" % ("VALID (hash <= target)" if best_value <= best_target else "above target"))
     else:
-        print("Best Hash       : waiting for hash")
-        print("Target Status   : waiting for hash")
+        print("Best Hash Quality: waiting for hash")
+        print("Target Status    : waiting for hash")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
