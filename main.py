@@ -194,41 +194,40 @@ def render_dashboard(rate, interval_hashes=None):
     submit_elapsed = max(now_mono - first_submit_at, 1.0) if first_submit_at is not None else 0.0
     submit_per_min = ctx.shares_submitted * 60.0 / submit_elapsed if submit_elapsed else 0.0
 
-    print("Submitted    : %s" % format(ctx.shares_submitted, ","))
-    print("Accepted     : %s" % format(ctx.shares_accepted, ","))
-    print("Rejected     : %s" % format(ctx.shares_rejected, ","))
-    print("Pending      : %s" % format(pending_count, ","))
-    print("Acceptance   : %.2f%%" % acceptance_rate)
-    print("Rejection    : %.2f%%" % rejection_rate)
-    print("Last Submit  : %s" % ("never" if submit_age is None else "%.1fs ago" % submit_age))
-    print("Last Result  : %s%s" % (last_result, (" | " + last_error) if last_error else ""))
-    print("Result Age   : %s" % ("never" if result_age is None else "%.1fs ago" % result_age))
-    print("Pool Diff    : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
-    print("Last Job     : %s" % (ctx.job_id or "none"))
-    print("Hashing Data : New Block Header (Prev Hash + Merkle Root + Time + nBits + Nonce)")
-    header_status = mining_header_status
-    print("Header Source: %s" % header_status["mode"])
-    print("Variable Now : Nonce (changes on every hash)")
-    print("Header Rotate: every %.0fs (extranonce2 + ntime)" % HEADER_ROTATE_INTERVAL if header_status["mode"] != "waiting for job" else "Header Rotate: waiting for job")
-    print("Header Job   : %s" % (header_status["job_id"] or "waiting"))
-    print("Header Fields: Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
-    print("Active Extra2: %s" % (header_status["extranonce2"] or "waiting"))
-    print("Active ntime : %s" % (header_status["ntime"] or "waiting"))
+    # Group the live dashboard by subsystem so operators can spot issues quickly.
+    print("")
+    print(Fore.CYAN + "=== 1. MINING / HASH ENGINE ===" + Style.RESET_ALL)
+    print("Mining Time       : %s" % structured_logger.dashboard_snapshot()["mining_duration"])
+    print("Hashrate          : %s MH/s" % format(rate / 1_000_000, ",.6f"))
+    print("Total Hashes      : %s" % format(ctx.total_hashes, ","))
     with best_hash_lock:
         best_value = best_hash_stats["value"]
         best_target = best_hash_stats["target"]
-        best_job = best_hash_stats["job_id"]
-        best_nonce = best_hash_stats["nonce"]
-        best_engine = best_hash_stats["engine"]
-    if best_value is not None and best_target:
-        # Bounded display score: 100 * target/hash, capped at 100%.
-        # This is an intuitive target-relative score, not mining probability.
-        quality = min(100.0, (best_target / best_value) * 100.0)
-        print("Best Hash Quality: %.12g%%" % quality)
-        print("Target Status    : %s" % ("VALID (hash <= target)" if best_value <= best_target else "above target"))
-    else:
-        print("Best Hash Quality: waiting for hash")
-        print("Target Status    : waiting for hash")
+    print("Best Hash Quality : %s" % ("%.12g%%" % min(100.0, (best_target / best_value) * 100.0) if best_value is not None and best_target else "waiting for hash"))
+    print("Target Status     : %s" % (("VALID (hash <= target)" if best_value <= best_target else "above target") if best_value is not None and best_target else "waiting for hash"))
+    print("")
+    print(Fore.CYAN + "=== 2. POOL CONNECTION / JOB ===" + Style.RESET_ALL)
+    print("Connection        : %s" % ("connected" if ctx.upstream_alive else "disconnected / connecting"))
+    print("Pool Difficulty   : %s" % (ctx.upstream_difficulty if ctx.upstream_difficulty is not None else "unknown"))
+    print("Last Job          : %s" % (ctx.job_id or "none"))
+    print("")
+    print(Fore.CYAN + "=== 3. SHARES / SUBMISSIONS ===" + Style.RESET_ALL)
+    print("Submitted         : %s" % format(ctx.shares_submitted, ","))
+    print("Accepted          : %s" % format(ctx.shares_accepted, ","))
+    print("Rejected          : %s" % format(ctx.shares_rejected, ","))
+    print("Pending           : %s" % format(pending_count, ","))
+    print("Acceptance        : %s" % ("%.2f%%" % acceptance_rate if resolved else "N/A (no resolved shares)"))
+    print("Rejection         : %s" % ("%.2f%%" % rejection_rate if resolved else "N/A (no resolved shares)"))
+    print("Last Submit       : %s" % ("never" if submit_age is None else "%.1fs ago" % submit_age))
+    print("Last Result       : %s%s" % (last_result, (" | " + last_error) if last_error else ""))
+    print("Result Age        : %s" % ("never" if result_age is None else "%.1fs ago" % result_age))
+    print("Submit Rate       : %.2f/min" % submit_per_min)
+    print("Submit Latency    : avg %.3fs | max %.3fs | samples %s" % (
+        latency_total / latency_count if latency_count else 0.0,
+        latency_max, format(latency_count, ",")
+    ))
+    print("")
+    print(Fore.CYAN + "=== 4. PROOF OF WORK ===" + Style.RESET_ALL)
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
@@ -239,29 +238,40 @@ def render_dashboard(rate, interval_hashes=None):
         pow_last_nonce = pow_stats["last_nonce"]
         pow_last_engine = pow_stats["last_engine"]
     pow_age = now_mono - pow_last_at if pow_last_at is not None else None
-    print("PoW Candidates: %s" % format(candidate_count, ","))
-    print("PoW Verified  : %s" % format(verified_count, ","))
-    print("PoW Verify Fail: %s" % format(verification_failed_count, ","))
-    print("Last PoW Hit  : %s" % ("never" if pow_age is None else "%.1fs ago" % pow_age))
-    print("Last PoW State: %s" % pow_last_status)
+    print("PoW Candidates    : %s" % format(candidate_count, ","))
+    print("PoW Verified      : %s" % format(verified_count, ","))
+    print("PoW Verify Fail   : %s" % format(verification_failed_count, ","))
+    print("Last PoW Hit      : %s" % ("never" if pow_age is None else "%.1fs ago" % pow_age))
+    print("Last PoW State    : %s" % pow_last_status)
     if pow_last_job:
-        print("PoW Job/Nonce : %s / %s (%s)" % (pow_last_job, pow_last_nonce, pow_last_engine))
+        print("PoW Job / Nonce   : %s / %s (%s)" % (pow_last_job, pow_last_nonce, pow_last_engine))
+    print("")
+    print(Fore.CYAN + "=== 5. HEADER MANAGEMENT ===" + Style.RESET_ALL)
+    header_status = mining_header_status
+    print("Header Source     : %s" % header_status["mode"])
+    print("Header Job        : %s" % (header_status["job_id"] or "waiting"))
+    print("Header Fields     : Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
+    print("Variable Now      : Nonce (changes on every hash)")
+    print("Header Rotate     : every %.0fs (extranonce2 + ntime)" % HEADER_ROTATE_INTERVAL if header_status["mode"] != "waiting for job" else "Header Rotate     : waiting for job")
+    print("Active Extra2     : %s" % (header_status["extranonce2"] or "waiting"))
+    print("Active ntime      : %s" % (header_status["ntime"] or "waiting"))
+    print("")
+    print(Fore.CYAN + "=== 6. DIAGNOSTICS ===" + Style.RESET_ALL)
     snapshot = structured_logger.dashboard_snapshot()
-    print("Bugs (all recorded):")
+    print("Bugs (total %s):" % format(snapshot["error_count"], ","))
     if snapshot["errors"]:
         for index, message in enumerate(snapshot["errors"], 1):
             print("  %d. %s" % (index, message))
     else:
         print("  None")
-    print("Warnings (all recorded):")
+    print("Warnings (total %s):" % format(snapshot["warning_count"], ","))
     if snapshot["warnings"]:
         for index, message in enumerate(snapshot["warnings"], 1):
             print("  %d. %s" % (index, message))
     else:
         print("  None")
-    print("Mining Time  : %s" % snapshot["mining_duration"])
-    print("Debug Log    : miner-debug.log")
-    print("Event Log    : %s" % structured_logger.event_path)
+    print("Debug Log         : miner-debug.log")
+    print("Event Log         : %s" % structured_logger.event_path)
     structured_logger.log_mining_status(
         total_hashes=ctx.total_hashes,
         shares_submitted=ctx.shares_submitted,
