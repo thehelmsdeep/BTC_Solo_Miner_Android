@@ -216,6 +216,25 @@ def render_dashboard(rate, interval_hashes=None):
         return "%s × 10%s" % (mantissa, str(int(exponent)).translate(superscript))
     print("Target            : %s" % short_scientific(best_target))
     print("Best Hash         : %s" % short_scientific(best_value))
+    if best_value is None or best_target is None or best_target <= 0:
+        print("Hash / Target     : waiting for hash")
+        print("Target Vector     : [--------------------] waiting")
+        print("PoW Status        : waiting for hash")
+    else:
+        hash_target_pct = (best_value / best_target) * 100.0
+        # Scale the bar smoothly so values above target remain visually distinguishable.
+        bar_width = 20
+        bar_fill = int(round(bar_width * hash_target_pct / (100.0 + hash_target_pct)))
+        bar_fill = max(0, min(bar_width, bar_fill))
+        bar = ("█" * bar_fill) + ("░" * (bar_width - bar_fill))
+        if best_value <= best_target:
+            print("Hash / Target     : %.6g%%" % hash_target_pct)
+            print(Fore.GREEN + "Target Vector     : [%s]" % bar + Style.RESET_ALL)
+            print(Fore.GREEN + "PoW Status        : VALID (hash <= target)" + Style.RESET_ALL)
+        else:
+            print("Hash / Target     : %.6g%%" % hash_target_pct)
+            print(Fore.RED + "Target Vector     : [%s]" % bar + Style.RESET_ALL)
+            print(Fore.RED + "PoW Status        : ABOVE TARGET (not a winning hash)" + Style.RESET_ALL)
     print("")
     print(Fore.CYAN + "=== 2. POOL CONNECTION / JOB ===" + Style.RESET_ALL)
     print("Connection        : %s" % ("connected" if ctx.upstream_alive else "disconnected / connecting"))
