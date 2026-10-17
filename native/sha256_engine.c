@@ -1626,10 +1626,13 @@ int b_m_engine_exhausted(BM_ENGINE *e) {
     return exhausted;
 }
 
-/* Approximate upper boundary of nonce ranges already allocated to workers. */
+/* Return the actual 32-bit nonce at the current logical scan cursor.
+ * Each engine has its own rotated nonce_start, so the dashboard shows the
+ * real nonce position rather than the shared-looking logical offset. */
 uint64_t b_m_engine_next_nonce(BM_ENGINE *e) {
     if (!e) return 0;
-    return __atomic_load_n(&e->next_nonce, __ATOMIC_RELAXED);
+    uint64_t offset = __atomic_load_n(&e->next_nonce, __ATOMIC_RELAXED);
+    return (uint32_t)(e->nonce_start + (uint32_t)offset);
 }
 
 void b_m_engine_stop_job(BM_ENGINE *e) {
