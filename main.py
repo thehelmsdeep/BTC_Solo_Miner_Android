@@ -5,6 +5,7 @@ import logging
 import multiprocessing as mp
 import queue
 import os
+import secrets
 import pathlib
 import platform
 import shutil
@@ -1302,6 +1303,13 @@ def miner_loop():
             current_job = None
             extranonce2 = None
             waiting_for_new_job = False
+            # Refresh mutable header fields periodically, without waiting for the
+            # 32-bit nonce range to be exhausted. Keep the interval long enough
+            # to avoid repeatedly rebuilding the coinbase/Merkle root.
+            header_rotate_interval = max(
+                1.0, float(os.getenv("BTC_MINER_HEADER_ROTATE_SECONDS", "5"))
+            )
+            last_header_rotation = time.monotonic()
 
             while not ctx.fShutdown and ctx.upstream_alive:
                 job = globals()["current_job"]()
@@ -1312,11 +1320,10 @@ def miner_loop():
                 if job["generation"] != current_generation and not waiting_for_new_job:
                     extranonce2_size = int(job["extranonce2_size"])
                     mask = (1 << (8 * extranonce2_size)) - 1
-                    extranonce2 = (time.time_ns() & mask).to_bytes(
-                        extranonce2_size, "big"
-                    ).hex()
+                    extranonce2 = secrets.token_bytes(extranonce2_size).hex()
+                    ntime = job["ntime"]
 
-                    header_prefix = build_header_prefix(job, extranonce2)
+                    header_prefix = build_header_prefix(job, extranonce2, ntime=ntime)
                     target = compact_to_target(job["nbits"])
 
                     if not native_engine_set_job(engine, header_prefix, target):
@@ -1326,8 +1333,10 @@ def miner_loop():
                     # A later mining.notify must never mix metadata into a found nonce.
                     current_job = dict(job)
                     current_job["base_ntime"] = job["ntime"]
+                    current_job["ntime"] = ntime
                     current_job["extranonce2"] = extranonce2
                     current_job["header_prefix"] = header_prefix
+                    last_header_rotation = time.monotonic()
                     current_job["target"] = target
                     current_generation = job["generation"]
 
@@ -1376,39 +1385,63 @@ def miner_loop():
                     # creates a new header search space without walking time
                     # forward thousands of times on the same coinbase.
                     extranonce2_size = int(current_job["extranonce2_size"])
-                    mask = (1 << (8 * extranonce2_size)) - 1
-                    current_extranonce = int(current_job["extranonce2"], 16)
-                    if current_extranonce >= mask:
-                        logg("[!] Extranonce space exhausted; waiting for a new Stratum job")
-                        native_engine_stop_job(engine)
-                        waiting_for_new_job = True
-                        current_generation = None
-                        continue
-
-                    next_extranonce = current_extranonce + 1
-                    extranonce2 = next_extranonce.to_bytes(extranonce2_size, "big").hex()
-                    # Keep the job's supplied timestamp unless it is no longer
-                    # within the Stratum future-time allowance; never submit a
-                    # timestamp that was not used to build this exact header.
+                    extranonce2 = secrets.token_bytes(extranonce2_size).hex()
+                    # Stratum permits rolling ntime only within a bounded range.
+                    # Never go earlier than the job's original ntime or later than
+                    # the usual two-hour future allowance.
                     base_ntime = current_job.get("base_ntime", current_job["ntime"])
+                    base_time = int(base_ntime, 16)
                     now_limit = min(0xFFFFFFFF, int(time.time()) + 7200)
-                    current_time = int(current_job["ntime"], 16)
-                    ntime = current_job["ntime"] if current_time <= now_limit else base_ntime
+                    lower_time = min(base_time, now_limit)
+                    ntime_value = secrets.randbelow(max(1, now_limit - lower_time + 1)) + lower_time
+                    ntime = "%08x" % ntime_value
                     header_prefix = build_header_prefix(
                         current_job, extranonce2, ntime=ntime
                     )
                     target = compact_to_target(current_job["nbits"])
                     if not native_engine_set_job(engine, header_prefix, target):
-                        raise RuntimeError("Failed to restart native engine after extranonce rotation")
+                        raise RuntimeError("Failed to restart native engine after nonce exhaustion")
 
                     current_job["extranonce2"] = extranonce2
                     current_job["ntime"] = ntime
                     current_job["header_prefix"] = header_prefix
                     current_job["target"] = target
-                    message = "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job"
+                    last_header_rotation = time.monotonic()
+                    message = "[!] Nonce space exhausted; randomized extranonce2/ntime and resumed the same job"
                     print(Fore.YELLOW, message)
                     logg(message)
                     continue
+
+                # Randomly roll the Stratum-authorized fields on a timer, not just
+                # after nonce exhaustion. Prevhash and nBits belong to the pool job;
+                # version rolling is only safe when explicitly negotiated.
+                if time.monotonic() - last_header_rotation >= header_rotate_interval:
+                    extranonce2_size = int(current_job["extranonce2_size"])
+                    extranonce2 = secrets.token_bytes(extranonce2_size).hex()
+                    base_ntime = current_job.get("base_ntime", current_job["ntime"])
+                    base_time = int(base_ntime, 16)
+                    now_limit = min(0xFFFFFFFF, int(time.time()) + 7200)
+                    lower_time = min(base_time, now_limit)
+                    ntime_value = secrets.randbelow(max(1, now_limit - lower_time + 1)) + lower_time
+                    ntime = "%08x" % ntime_value
+                    header_prefix = build_header_prefix(
+                        current_job, extranonce2, ntime=ntime
+                    )
+                    target = compact_to_target(current_job["nbits"])
+                    if not native_engine_set_job(engine, header_prefix, target):
+                        raise RuntimeError("Failed to rotate randomized native header")
+                    current_job["extranonce2"] = extranonce2
+                    current_job["ntime"] = ntime
+                    current_job["header_prefix"] = header_prefix
+                    current_job["target"] = target
+                    last_header_rotation = time.monotonic()
+                    debug_log(
+                        "Randomized mutable header fields",
+                        job_id=current_job["job_id"],
+                        extranonce2=extranonce2,
+                        ntime=ntime,
+                        interval_seconds=header_rotate_interval,
+                    )
 
                 if hit:
                     # A notify/set_extranonce can arrive while the native engine is
