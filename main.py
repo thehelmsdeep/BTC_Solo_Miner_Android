@@ -203,8 +203,14 @@ def render_dashboard(rate, interval_hashes=None):
     with best_hash_lock:
         best_value = best_hash_stats["value"]
         best_target = best_hash_stats["target"]
-    print("Best Hash / Target : %s" % ("%.12g%%" % ((best_value / best_target) * 100.0) if best_value is not None and best_target and best_target > 0 else "waiting for hash"))
-    print("Target Status     : %s" % (("VALID (hash <= target)" if best_value <= best_target else "above target") if best_value is not None and best_target else "waiting for hash"))
+    def short_scientific(value):
+        if value is None:
+            return "waiting for hash"
+        mantissa, exponent = ("%.2e" % value).split("e")
+        superscript = str.maketrans("0123456789-", "⁰¹²³⁴⁵⁶⁷⁸⁹⁻")
+        return "%s × 10%s" % (mantissa, str(int(exponent)).translate(superscript))
+    print("Target            : %s" % short_scientific(best_target))
+    print("Best Hash         : %s" % short_scientific(best_value))
     print("")
     print(Fore.CYAN + "=== 2. POOL CONNECTION / JOB ===" + Style.RESET_ALL)
     print("Connection        : %s" % ("connected" if ctx.upstream_alive else "disconnected / connecting"))
