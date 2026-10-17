@@ -222,9 +222,9 @@ def render_dashboard(rate, interval_hashes=None):
         # rounding ordinary proof-of-work candidates down to 0.000000%.
         ratio = 100.0 * best_target / best_value if best_value else 100.0
         ratio = min(100.0, ratio)
-        print("Hash/Target: %.6g%% (latest hash)" % ratio)
+        print("Latest Hash Closeness: %.6g%%" % ratio)
     else:
-        print("Hash/Target: waiting for hash")
+        print("Latest Hash Closeness: waiting for hash")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
