@@ -74,9 +74,9 @@ pow_stats = {
     "last_engine": "",
 }
 
-# Best observed real proof-of-work digest, normalized against its job target.
-# Native mode reports a nonce from a completed scan chunk; Python mode records
-# each digest without logging every hash to disk.
+# Best observed digest normalized against its own job target.
+# Native mode currently samples one nonce per completed scan chunk, so this is
+# the best OBSERVED sample, not a guarantee of the best digest among every hash.
 best_hash_lock = threading.Lock()
 best_hash_stats = {
     "value": None,
@@ -225,12 +225,17 @@ def render_dashboard(rate, interval_hashes=None):
         best_nonce = best_hash_stats["nonce"]
         best_engine = best_hash_stats["engine"]
     if best_value is not None and best_target:
-        # Show the best observed hash's closeness to its own job target.
-        # Scientific notation preserves tiny non-zero percentages.
-        ratio = min(100.0, 100.0 * best_target / best_value) if best_value else 100.0
-        print("Best Hash Closeness: %.6g%%" % ratio)
+        # Hash/target is the direct, interpretable ratio: <= 100% meets target;
+        # > 100% is above target. Do not cap it or call it "closeness".
+        ratio = 100.0 * best_value / best_target
+        print("Best Observed Hash/Target: %.8g%%" % ratio)
+        print("Best Hash Value : %064x" % best_value)
+        print("Best Hash Target: %064x" % best_target)
+        print("Best Hash Job   : %s" % (best_job or "unknown"))
+        print("Best Hash Nonce : %s" % (best_nonce or "unknown"))
+        print("Best Hash Engine: %s" % (best_engine or "unknown"))
     else:
-        print("Best Hash Closeness: waiting for hash")
+        print("Best Observed Hash/Target: waiting for hash")
     with pow_stats_lock:
         candidate_count = pow_stats["candidates"]
         verified_count = pow_stats["verified"]
