@@ -115,6 +115,10 @@ mining_header_status = {
     "extranonce2": None,
     "ntime": None,
     "mode": "waiting for job",
+    "universe_count": 0,
+    "universes": [],
+    "nonce_cursor": None,
+    "last_rotation_at": None,
 }
 
 def record_pow_status(status, job_id, nonce, engine):
@@ -257,15 +261,39 @@ def render_dashboard(rate, interval_hashes=None):
     if pow_last_job:
         print("PoW Job / Nonce   : %s / %s (%s)" % (pow_last_job, pow_last_nonce, pow_last_engine))
     print("")
-    print(Fore.CYAN + "=== 5. HEADER MANAGEMENT ===" + Style.RESET_ALL)
+    print(Fore.CYAN + "=== 5. HEADER ENGINE ===" + Style.RESET_ALL)
     header_status = mining_header_status
-    print("Header Source     : %s" % header_status["mode"])
-    print("Header Job        : %s" % (header_status["job_id"] or "waiting"))
-    print("Header Fields     : Prev Hash + Merkle Root(extranonce2) + ntime + nBits + nonce")
-    print("Variable Now      : Nonce (changes on every hash)")
-    print("Header Rotate     : every %.0fs (extranonce2 + ntime)" % HEADER_ROTATE_INTERVAL if header_status["mode"] != "waiting for job" else "Header Rotate     : waiting for job")
-    print("Active Extra2     : %s" % (header_status["extranonce2"] or "waiting"))
-    print("Active ntime      : %s" % (header_status["ntime"] or "waiting"))
+    print("Mining Mode       : %s" % header_status["mode"])
+    print("Active Job        : %s" % (header_status["job_id"] or "waiting"))
+    print("Header Rotation   : every %.0fs" % HEADER_ROTATE_INTERVAL if header_status["mode"] != "waiting for job" else "Header Rotation   : waiting for job")
+    if header_status["last_rotation_at"] is not None:
+        rotation_age = max(0.0, now_mono - header_status["last_rotation_at"])
+        print("Last Rotation     : %.1fs ago" % rotation_age)
+    else:
+        print("Last Rotation     : waiting")
+    universe_details = header_status.get("universes") or []
+    universe_count = header_status.get("universe_count", len(universe_details))
+    print("Active Universes  : %s" % universe_count)
+    if universe_details:
+        for item in universe_details:
+            print("  U%-2s Job         : %s" % (item.get("index", "?"), item.get("job_id", "waiting")))
+            print("     Nonce Cursor  : %s" % item.get("nonce_cursor", "waiting"))
+            print("     ExtraNonce2   : %s" % item.get("extranonce2", "waiting"))
+            print("     nTime         : %s" % item.get("ntime", "waiting"))
+            print("     Rotation Age  : %s" % (
+                "%.1fs" % max(0.0, now_mono - item["last_rotation_at"])
+                if item.get("last_rotation_at") is not None else "waiting"
+            ))
+    else:
+        print("Nonce Cursor      : %s" % (
+            "%08x" % header_status["nonce_cursor"]
+            if header_status.get("nonce_cursor") is not None else "waiting"
+        ))
+        print("Active Extra2     : %s" % (header_status["extranonce2"] or "waiting"))
+        print("Active nTime      : %s" % (header_status["ntime"] or "waiting"))
+    print("Header Status     : %s" % (
+        "rotating" if header_status["last_rotation_at"] is not None else "waiting for job"
+    ))
     print("")
     print(Fore.CYAN + "=== 6. DIAGNOSTICS ===" + Style.RESET_ALL)
     snapshot = structured_logger.dashboard_snapshot()
@@ -1413,6 +1441,8 @@ def miner_loop():
                         extranonce2=universes[0]["snapshot"]["extranonce2"],
                         ntime=universes[0]["snapshot"]["ntime"],
                         mode="multi-universe + rotational header",
+                        universe_count=universe_count,
+                        last_rotation_at=time.monotonic(),
                     )
                     print(
                         Fore.CYAN,
@@ -1565,6 +1595,8 @@ def miner_loop():
                         extranonce2=snapshot["extranonce2"],
                         ntime=snapshot["ntime"],
                         mode="multi-universe + rotational header",
+                        universe_count=universe_count,
+                        last_rotation_at=time.monotonic(),
                     )
                     debug_log(
                         "Header universe rotated",
@@ -1604,6 +1636,18 @@ def miner_loop():
                         workers=worker_count_snapshot(CPU_THREADS),
                         elapsed_uptime=metrics.snapshot()["uptime_s"],
                     )
+                    mining_header_status["universes"] = [
+                        {
+                            "index": index,
+                            "job_id": item["snapshot"]["job_id"] if item["snapshot"] else "waiting",
+                            "extranonce2": item["snapshot"]["extranonce2"] if item["snapshot"] else "waiting",
+                            "ntime": item["snapshot"]["ntime"] if item["snapshot"] else "waiting",
+                            "nonce_cursor": "%08x" % min(native_engine_next_nonce(item["engine"]), 0xFFFFFFFF),
+                            "last_rotation_at": item["last_rotation"],
+                        }
+                        for index, item in enumerate(universes, 1)
+                    ]
+                    mining_header_status["universe_count"] = universe_count
                     render_dashboard(rate, hashes_since_report)
                     hashes_since_report = 0
                     last_report = now
@@ -1634,6 +1678,8 @@ def miner_loop():
         mining_header_status.update(
             job_id=job["job_id"], extranonce2=extranonce2,
             ntime=job["ntime"], mode="randomized extranonce2 + ntime",
+            universe_count=1, universes=[], nonce_cursor=None,
+            last_rotation_at=time.monotonic(),
         )
         debug_log("Python job mining started", job_id=job["job_id"],
                   target_hex="%064x" % compact_to_target(job["nbits"]),
@@ -1672,6 +1718,7 @@ def miner_loop():
 
                     elif event[0] == "worker_progress":
                         _, worker_id, next_nonce, delta_hashes, elapsed = event
+                        mining_header_status["nonce_cursor"] = int(next_nonce) & 0xFFFFFFFF
                         debug_log("Nonce range progress", worker_id=worker_id,
                                   job_id=job["job_id"], next_nonce="%08x" % min(next_nonce, 0xFFFFFFFF),
                                   hashes_since_last_report=delta_hashes, elapsed_seconds=elapsed,
@@ -1788,6 +1835,7 @@ def miner_loop():
                 mining_header_status.update(
                     job_id=job["job_id"], extranonce2=extranonce2,
                     ntime=job["ntime"], mode="randomized extranonce2 + ntime",
+                    universe_count=1, universes=[], last_rotation_at=time.monotonic(),
                 )
                 debug_log(
                     "Randomized mutable header fields", engine="python",
