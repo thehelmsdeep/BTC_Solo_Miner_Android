@@ -609,8 +609,8 @@ def stratum_prevhash_to_header(prevhash):
     return b"".join(raw[i:i + 4][::-1] for i in range(0, 32, 4))
 
 
-def build_header_prefix(job, extranonce2):
-    """Build the exact header prefix from one immutable Stratum job snapshot."""
+def build_header_prefix(job, extranonce2, ntime=None, version=None):
+    """Build a header prefix, optionally rolling Stratum-authorized header fields."""
     extranonce1 = job.get("extranonce1")
     extranonce2_size = job.get("extranonce2_size")
     if not isinstance(extranonce1, str):
@@ -635,10 +635,10 @@ def build_header_prefix(job, extranonce2):
         )
 
     header = (
-        bytes.fromhex(job["version"])[::-1]
+        bytes.fromhex(version if version is not None else job["version"])[::-1]
         + stratum_prevhash_to_header(job["prevhash"])
         + merkle_root
-        + bytes.fromhex(job["ntime"])[::-1]
+        + bytes.fromhex(ntime if ntime is not None else job["ntime"])[::-1]
         + bytes.fromhex(job["nbits"])[::-1]
     )
 
@@ -807,8 +807,12 @@ def submit_share(job_id, extranonce2, ntime, nonce, expected_generation=None):
 
         # Final end-to-end gate: reconstruct the current job's exact header
         # and independently verify proof of work immediately before socket send.
-        if ctx.job_id != job_id or ctx.ntime != ntime:
-            raise ValueError("Candidate job/time does not match the active Stratum job")
+        if ctx.job_id != job_id:
+            raise ValueError("Candidate job does not match the active Stratum job")
+        candidate_time = int(ntime, 16)
+        base_time = int(ctx.ntime, 16)
+        if candidate_time < base_time or candidate_time > min(0xFFFFFFFF, int(time.time()) + 7200):
+            raise ValueError("Candidate timestamp is outside the permitted rolling window")
         verification_job = {
             "job_id": ctx.job_id,
             "prevhash": ctx.prevhash,
@@ -817,7 +821,7 @@ def submit_share(job_id, extranonce2, ntime, nonce, expected_generation=None):
             "merkle_branch": list(ctx.merkle_branch or []),
             "version": ctx.version,
             "nbits": ctx.nbits,
-            "ntime": ctx.ntime,
+            "ntime": ntime,
             "clean_jobs": ctx.clean_jobs,
             "extranonce1": ctx.upstream_extranonce1,
             "extranonce2_size": ctx.upstream_extranonce2_size,
@@ -1321,6 +1325,7 @@ def miner_loop():
                     # Freeze the exact job/extranonce/header used by native hashing.
                     # A later mining.notify must never mix metadata into a found nonce.
                     current_job = dict(job)
+                    current_job["base_ntime"] = job["ntime"]
                     current_job["extranonce2"] = extranonce2
                     current_job["header_prefix"] = header_prefix
                     current_job["target"] = target
@@ -1368,24 +1373,49 @@ def miner_loop():
                 if native_engine_exhausted(engine) and not hit:
                     extranonce2_size = int(current_job["extranonce2_size"])
                     mask = (1 << (8 * extranonce2_size)) - 1
-                    # Advance the previous value deterministically instead of deriving
-                    # it from the clock, so consecutive nonce-space rotations cannot
-                    # accidentally reuse the same extranonce2.
-                    extranonce2 = (
-                        (int(current_job["extranonce2"], 16) + 1) & mask
-                    ).to_bytes(extranonce2_size, "big").hex()
-                    header_prefix = build_header_prefix(current_job, extranonce2)
-                    target = compact_to_target(current_job["nbits"])
-                    if not native_engine_set_job(engine, header_prefix, target):
-                        raise RuntimeError("Failed to restart native engine after nonce exhaustion")
+                    base_ntime = current_job.get("base_ntime", current_job["ntime"])
+                    now_limit = min(0xFFFFFFFF, int(time.time()) + 7200)
+                    current_time = int(current_job["ntime"], 16)
 
-                    # Refresh the frozen submission snapshot so it exactly matches
-                    # the header now being hashed by the native engine.
-                    current_job["extranonce2"] = extranonce2
-                    current_job["header_prefix"] = header_prefix
-                    current_job["target"] = target
+                    # Search each permitted timestamp for the current coinbase
+                    # before moving the extranonce. Previous-block hash and nBits
+                    # remain fixed to the Stratum job.
+                    if current_time < now_limit:
+                        next_time = current_time + 1
+                        ntime = "%08x" % next_time
+                        header_prefix = build_header_prefix(
+                            current_job, current_job["extranonce2"], ntime=ntime
+                        )
+                        target = compact_to_target(current_job["nbits"])
+                        if not native_engine_set_job(engine, header_prefix, target):
+                            raise RuntimeError("Failed to restart native engine after timestamp roll")
+                        current_job["ntime"] = ntime
+                        current_job["header_prefix"] = header_prefix
+                        current_job["target"] = target
+                        message = "[!] Nonce space exhausted; advanced timestamp and resumed the same job"
+                    else:
+                        # Timestamp window reached: advance the coinbase extranonce,
+                        # which changes the Merkle root, then restart at the job time.
+                        next_extranonce = (int(current_job["extranonce2"], 16) + 1) & mask
+                        if next_extranonce == int(current_job["extranonce2"], 16):
+                            logg("[!] Extranonce space exhausted; waiting for a new Stratum job")
+                            native_engine_stop_job(engine)
+                            waiting_for_new_job = True
+                            continue
+                        extranonce2 = next_extranonce.to_bytes(extranonce2_size, "big").hex()
+                        ntime = base_ntime
+                        header_prefix = build_header_prefix(
+                            current_job, extranonce2, ntime=ntime
+                        )
+                        target = compact_to_target(current_job["nbits"])
+                        if not native_engine_set_job(engine, header_prefix, target):
+                            raise RuntimeError("Failed to restart native engine after extranonce rotation")
+                        current_job["extranonce2"] = extranonce2
+                        current_job["ntime"] = ntime
+                        current_job["header_prefix"] = header_prefix
+                        current_job["target"] = target
+                        message = "[!] Timestamp window exhausted; rotated extranonce2 and resumed the same job"
 
-                    message = "[!] Nonce space exhausted; rotated extranonce2 and resumed the same job"
                     print(Fore.YELLOW, message)
                     logg(message)
                     continue
